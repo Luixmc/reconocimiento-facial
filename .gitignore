@@ -1,0 +1,33 @@
+# BioFace - .gitignore
+
+# Python backend
+backend/backend.log
+backend/backend.log.*
+backend/backend.pid
+backend/*.spec
+backend/build/
+backend/dist/
+backend/__pycache__/
+backend/*.pyc
+backend/.coverage
+
+# Flutter
+.dart_tool/
+.packages
+.pub/
+build/
+*.iml
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE
+.idea/
+.vscode/
+*.suo
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
