@@ -49,4 +49,20 @@ class BackendClient {
 
   Future<http.Response> post(String path, {Object? body}) =>
       http.post(_uri(path), headers: _headers, body: body).timeout(_timeout);
+
+  /// POST multipart/form-data (p.ej. para subir una imagen de enrollment).
+  Future<http.Response> postMultipart(
+    String path, {
+    Map<String, String> fields = const {},
+    required String fileField,
+    required List<int> fileBytes,
+    required String filename,
+  }) async {
+    final request = http.MultipartRequest('POST', _uri(path))
+      ..headers.addAll({'X-Backend-Token': _token ?? ''})
+      ..fields.addAll(fields)
+      ..files.add(http.MultipartFile.fromBytes(fileField, fileBytes, filename: filename));
+    final streamed = await request.send().timeout(const Duration(seconds: 20));
+    return http.Response.fromStream(streamed);
+  }
 }

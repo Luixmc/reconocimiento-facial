@@ -1,0 +1,383 @@
+13:11:17 [INFO] face_detector: InsightFace buffalo_s inicializado correctamente
+13:11:18 [INFO] face_detector: Cargados 0 embeddings desde Supabase
+13:11:18 [INFO] device_manager: Device UID generado: BF-1AF65303CDAEEB02
+13:11:18 [INFO] offline_queue: OfflineQueue inicializada en F:\Repositorios\reconocimiento-facial\backend\offline_records.db
+13:11:18 [INFO] backend: ==================================================
+13:11:18 [INFO] backend: BioFace - Sistema de Reconocimiento Facial (Headless)
+13:11:18 [INFO] backend: ==================================================
+13:11:18 [INFO] startup_checks: Ejecutando verificaciones de arranque...
+13:11:19 [WARNING] startup_checks: No hay licencia activa para COMPANY_ID=29a16860-65aa-4279-a924-9cc6b10443d8
+13:11:19 [ERROR] startup_checks: LICENCIA INVÁLIDA — el sistema no arrancará en producción.
+13:11:20 [INFO] device_manager: Dispositivo registrado en Supabase: BF-1AF65303CDAEEB02
+13:11:20 [INFO] device_manager: Heartbeat iniciado (cada 60s)
+13:11:20 [INFO] offline_queue: Daemon offline-sync iniciado (cada 600s)
+13:11:20 [INFO] backend: Caché limpiada — 0.14 MB liberados
+13:11:21 [INFO] backend: Token de autenticación escrito en backend.token
+13:11:21 [INFO] backend: HTTP API en http://127.0.0.1:5050
+13:11:21 [INFO] backend: Watchdog: iniciando bucle de captura...
+13:11:21 [INFO] source_manager: Fuente cerrada
+13:11:21 [INFO] backend: Iniciando bucle de captura headless...
+13:11:21 [INFO] comtypes.client._code_cache: Could not import comtypes.gen, trying to create it.
+13:11:21 [INFO] comtypes.client._code_cache: Created comtypes.gen directory: 'C:\Users\Luis Daniel De León\AppData\Roaming\Python\Python314\site-packages\comtypes\gen'
+13:11:21 [INFO] comtypes.client._code_cache: Writing __init__.py file: 'C:\Users\Luis Daniel De León\AppData\Roaming\Python\Python314\site-packages\comtypes\gen\__init__.py'
+13:11:21 [INFO] comtypes.client._code_cache: Using writeable comtypes cache directory: 'C:\Users\Luis Daniel De León\AppData\Roaming\Python\Python314\site-packages\comtypes\gen'
+13:11:21 [INFO] comtypes.client._generate: Could not import comtypes.gen._78530B68_61F9_11D2_8CAD_00A024580902_0_1_0: No module named 'comtypes.gen._78530B68_61F9_11D2_8CAD_00A024580902_0_1_0'
+13:11:21 [INFO] comtypes.client._generate: # Generating comtypes.gen._78530B68_61F9_11D2_8CAD_00A024580902_0_1_0
+13:11:21 [INFO] comtypes.client._generate: # Generating comtypes.gen.DexterLib
+13:11:21 [INFO] comtypes.client._generate: Could not import comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0: No module named 'comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0'
+13:11:21 [INFO] comtypes.client._generate: # Generating comtypes.gen._00020430_0000_0000_C000_000000000046_0_2_0
+13:11:21 [INFO] comtypes.client._generate: # Generating comtypes.gen.stdole
+13:11:22 [INFO] comtypes.client._generate: Could not import comtypes.gen._56A868B0_0AD4_11CE_B03A_0020AF0BA770_0_1_0: No module named 'comtypes.gen._56A868B0_0AD4_11CE_B03A_0020AF0BA770_0_1_0'
+13:11:22 [INFO] comtypes.client._generate: # Generating comtypes.gen._56A868B0_0AD4_11CE_B03A_0020AF0BA770_0_1_0
+13:11:22 [INFO] comtypes.client._generate: # Generating comtypes.gen.QuartzTypeLib
+13:11:22 [INFO] camera_manager: Dispositivos de video reales: ['DroidCam Video', 'OBS Virtual Camera']
+13:11:22 [WARNING] supabase_client: Error creando bucket: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:11:22 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=True
+13:11:22 [INFO] source_manager: Fuente cerrada
+13:11:23 [INFO] source_manager: USB 1 abierta con Auto
+13:11:23 [INFO] source_manager: update_config: fuente activa — usb (1)
+13:11:23 [INFO] backend: Fuente activa: usb (1)
+13:11:23 [INFO] backend: Hilo lector de cámara iniciado
+13:12:12 [INFO] camera_manager: Dispositivos de video reales: ['DroidCam Video', 'OBS Virtual Camera']
+13:12:12 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:12:12 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:12:12 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:12:12 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:12:12 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:12:12 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:12:19 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=False
+13:12:19 [INFO] source_manager: Fuente cerrada
+13:12:19 [INFO] source_manager: USB 1 abierta con Auto
+13:12:19 [INFO] source_manager: update_config: fuente activa — usb (1)
+13:12:22 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=False
+13:12:22 [INFO] source_manager: Fuente cerrada
+13:12:22 [INFO] source_manager: USB 0 abierta con Auto
+13:12:22 [INFO] source_manager: update_config: fuente activa — usb (0)
+13:12:30 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:12:31 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:12:32 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:12:34 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:12:35 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:12:35 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:12:37 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:12:38 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:12:38 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:12:40 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:12:41 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:12:41 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:12:43 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:12:44 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:12:44 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:04 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:05 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:05 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:15 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:16 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:16 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:18 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:19 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:19 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:24 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:25 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:25 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:27 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:28 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:28 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:30 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:30 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:30 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:33 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:34 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:34 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:38 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:39 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:40 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:13:41 [WARNING] backend: Snapshot no subida (continuando): HTTP 400: {"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}
+13:13:42 [WARNING] supabase_client: Error inserting access record: {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"access_records\""}
+13:13:43 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=no)
+13:21:20 [INFO] offline_queue: Sincronizando 14 registros offline...
+13:21:29 [INFO] offline_queue: Sincronizados 0 registros offline.
+13:31:29 [INFO] offline_queue: Sincronizando 14 registros offline...
+13:31:38 [INFO] offline_queue: Sincronizados 0 registros offline.
+13:33:36 [INFO] backend: Caché limpiada — 0.02 MB liberados
+13:36:41 [INFO] camera_manager: Dispositivos de video reales: ['DroidCam Video', 'OBS Virtual Camera']
+13:36:45 [INFO] face_detector: InsightFace buffalo_s inicializado correctamente
+13:36:47 [INFO] face_detector: Cargados 5 embeddings desde Supabase
+13:36:47 [INFO] offline_queue: OfflineQueue inicializada en F:\Repositorios\reconocimiento-facial\backend\offline_records.db
+13:36:47 [INFO] backend: ==================================================
+13:36:47 [INFO] backend: BioFace - Sistema de Reconocimiento Facial (Headless)
+13:36:47 [INFO] backend: ==================================================
+13:36:47 [INFO] startup_checks: Ejecutando verificaciones de arranque...
+13:36:47 [INFO] startup_checks: Licencia activa: 1291be14-e5e4-4dc3-9776-06967df5c333
+13:36:47 [INFO] startup_checks: Versión actualizada: 0.1.0
+13:36:48 [INFO] device_manager: Dispositivo registrado en Supabase: BF-1AF65303CDAEEB02
+13:36:48 [INFO] device_manager: Heartbeat iniciado (cada 60s)
+13:36:48 [INFO] offline_queue: Daemon offline-sync iniciado (cada 600s)
+13:36:48 [INFO] backend: Caché limpiada — 0.20 MB liberados
+13:36:48 [WARNING] backend: Puerto 5050 ocupado por PID 6504. Liberando...
+13:36:49 [INFO] backend: Token de autenticación escrito en backend.token
+13:36:49 [INFO] backend: HTTP API en http://127.0.0.1:5050
+13:36:49 [INFO] backend: Watchdog: iniciando bucle de captura...
+13:36:49 [INFO] source_manager: Fuente cerrada
+13:36:49 [INFO] backend: Iniciando bucle de captura headless...
+13:36:50 [INFO] supabase_client: Bucket 'face-snapshots' ya existe
+13:36:50 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=True
+13:36:50 [INFO] source_manager: Fuente cerrada
+13:36:50 [INFO] source_manager: USB 1 abierta con Auto
+13:36:50 [INFO] source_manager: update_config: fuente activa — usb (1)
+13:36:50 [INFO] backend: Fuente activa: usb (1)
+13:36:50 [INFO] backend: Hilo lector de cámara iniciado
+13:55:11 [INFO] face_detector: InsightFace buffalo_l inicializado correctamente
+13:55:12 [INFO] face_detector: Cargados 5 embeddings desde Supabase
+13:55:12 [INFO] offline_queue: OfflineQueue inicializada en F:\Repositorios\reconocimiento-facial\backend\offline_records.db
+13:55:12 [INFO] backend: ==================================================
+13:55:12 [INFO] backend: BioFace - Sistema de Reconocimiento Facial (Headless)
+13:55:12 [INFO] backend: ==================================================
+13:55:12 [INFO] startup_checks: Ejecutando verificaciones de arranque...
+13:55:13 [INFO] startup_checks: Licencia activa: 1291be14-e5e4-4dc3-9776-06967df5c333
+13:55:13 [INFO] startup_checks: Versión actualizada: 0.1.0
+13:55:14 [INFO] device_manager: Dispositivo registrado en Supabase: BF-1AF65303CDAEEB02
+13:55:14 [INFO] device_manager: Heartbeat iniciado (cada 60s)
+13:55:14 [INFO] offline_queue: Daemon offline-sync iniciado (cada 600s)
+13:55:14 [INFO] backend: Caché limpiada — 0.21 MB liberados
+13:55:14 [INFO] backend: Token de autenticación escrito en backend.token
+13:55:14 [INFO] backend: HTTP API en http://127.0.0.1:5050
+13:55:14 [INFO] backend: Watchdog: iniciando bucle de captura...
+13:55:14 [INFO] source_manager: Fuente cerrada
+13:55:14 [INFO] backend: Iniciando bucle de captura headless...
+13:55:15 [INFO] comtypes.client._code_cache: Imported existing <module 'comtypes.gen' from 'C:\\Users\\Luis Daniel De León\\AppData\\Roaming\\Python\\Python314\\site-packages\\comtypes\\gen\\__init__.py'>
+13:55:15 [INFO] comtypes.client._code_cache: Using writeable comtypes cache directory: 'C:\Users\Luis Daniel De León\AppData\Roaming\Python\Python314\site-packages\comtypes\gen'
+13:55:15 [INFO] camera_manager: Dispositivos de video reales: ['DroidCam Video', 'OBS Virtual Camera']
+13:55:15 [INFO] supabase_client: Bucket 'face-snapshots' ya existe
+13:55:15 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=True
+13:55:15 [INFO] source_manager: Fuente cerrada
+13:55:15 [INFO] source_manager: USB 1 abierta con Auto
+13:55:15 [INFO] source_manager: update_config: fuente activa — usb (1)
+13:55:15 [INFO] backend: Fuente activa: usb (1)
+13:55:15 [INFO] backend: Hilo lector de cámara iniciado
+13:55:15 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:55:15 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:55:15 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:55:15 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:55:32 [WARNING] backend: Buffer vacío. Reintentando reconexión...
+13:55:32 [INFO] backend: Hilo lector de cámara finalizado
+13:55:32 [INFO] source_manager: Fuente cerrada
+13:55:33 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=True
+13:55:33 [INFO] source_manager: Fuente cerrada
+13:55:33 [INFO] source_manager: USB 1 abierta con Auto
+13:55:33 [INFO] source_manager: update_config: fuente activa — usb (1)
+13:55:33 [INFO] backend: Hilo lector de cámara iniciado
+13:55:33 [INFO] backend: Reconexión exitosa
+13:55:51 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=False
+13:55:52 [INFO] source_manager: Fuente cerrada
+13:55:52 [INFO] source_manager: USB 1 abierta con Auto
+13:55:52 [INFO] source_manager: update_config: fuente activa — usb (1)
+13:56:14 [INFO] camera_manager: Dispositivos de video reales: ['DroidCam Video', 'OBS Virtual Camera']
+13:56:14 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:56:14 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:56:14 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:56:14 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+13:56:20 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=False
+13:56:20 [INFO] source_manager: Fuente cerrada
+13:56:21 [INFO] source_manager: USB 0 abierta con Auto
+13:56:21 [INFO] source_manager: update_config: fuente activa — usb (0)
+13:56:25 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_d0db1f67b49f.jpg
+13:56:26 [INFO] supabase_client: Access record created: 2c6544de-bed8-4a9d-a55b-97293825609d (authorized · usb_0)
+13:56:27 [INFO] supabase_client: Attendance creada: 2f31e3a3-5f9f-4ee0-9404-ed61f80c9883 para 4df9209d-ca19-4b4d-9e87-329051508747
+13:56:28 [INFO] supabase_client: Mark entry registrada: 57ae51c7-d9f3-4fd3-9a5c-687bfe3259e2
+13:56:28 [INFO] attendance_service: ENTRADA registrada — persona 4df9209d-ca19-4b4d-9e87-329051508747
+13:56:28 [INFO] backend: DETECTADO: Luis (sim=0.768, conf=0.64, resultado=authorized, foto=si)
+13:56:28 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_0d13db2a4c2a.jpg
+13:56:29 [INFO] supabase_client: Access record created: 0255e2c0-116d-4b64-80d3-7e80a5bdf564 (authorized · usb_0)
+13:56:30 [INFO] supabase_client: Attendance cerrada: 2f31e3a3-5f9f-4ee0-9404-ed61f80c9883
+13:56:31 [INFO] supabase_client: Mark exit registrada: 28d2dd16-2a1b-4dc3-bf55-501e4dadfc24
+13:56:31 [INFO] attendance_service: SALIDA registrada — persona 4df9209d-ca19-4b4d-9e87-329051508747
+13:56:31 [INFO] backend: DETECTADO: Luis (sim=0.772, conf=0.65, resultado=authorized, foto=si)
+13:56:32 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_f52d718a8d85.jpg
+13:56:32 [INFO] supabase_client: Access record created: ef33af3a-556b-44af-91f9-d142e58c0648 (authorized · usb_0)
+13:56:34 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+13:56:34 [INFO] backend: DETECTADO: Luis (sim=0.689, conf=0.52, resultado=authorized, foto=si)
+13:56:35 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_1fe09275cbf2.jpg
+13:56:36 [INFO] supabase_client: Access record created: bf3d6c05-92be-4881-8396-cfe76c78e80c (authorized · usb_0)
+13:56:37 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+13:56:37 [INFO] backend: DETECTADO: Luis (sim=0.681, conf=0.51, resultado=authorized, foto=si)
+13:56:56 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_4fa53a82fe6f.jpg
+13:56:57 [INFO] supabase_client: Access record created: d04accb4-7b0b-4d81-bf68-a109e51ef834 (not_found · usb_0)
+13:56:57 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=si)
+13:56:59 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_215f6adf5a16.jpg
+13:57:00 [INFO] supabase_client: Access record created: c542ff06-03e2-47e3-8773-26b2ff8b6abf (not_found · usb_0)
+13:57:00 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=si)
+13:57:02 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_8218ba4b35dc.jpg
+13:57:02 [INFO] supabase_client: Access record created: 206381b2-0c91-41f3-a9aa-db839cdbec78 (not_found · usb_0)
+13:57:02 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=si)
+13:57:05 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_21782b35dd47.jpg
+13:57:05 [INFO] supabase_client: Access record created: 072bd72e-3283-408f-8fd7-16e48be3dfb9 (authorized · usb_0)
+13:57:07 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+13:57:07 [INFO] backend: DETECTADO: Luis (sim=0.755, conf=0.62, resultado=authorized, foto=si)
+13:57:10 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_ed2ce7214a42.jpg
+13:57:11 [INFO] supabase_client: Access record created: 17509c18-9bbb-46ea-a542-23c00a86f4c2 (authorized · usb_0)
+13:57:12 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+13:57:12 [INFO] backend: DETECTADO: Luis (sim=0.597, conf=0.38, resultado=authorized, foto=si)
+13:57:14 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_73cc54469ea5.jpg
+13:57:15 [INFO] supabase_client: Access record created: 089d5622-d7a2-4b6f-87f0-6d3729ecc8dc (not_found · usb_0)
+13:57:15 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=si)
+13:57:17 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_bb093c97e15c.jpg
+13:57:18 [INFO] supabase_client: Access record created: 7829b996-06c0-4426-930b-28ba4172b5f9 (authorized · usb_0)
+13:57:19 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+13:57:19 [INFO] backend: DETECTADO: Luis (sim=0.731, conf=0.59, resultado=authorized, foto=si)
+13:57:21 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_ec5ec911048f.jpg
+13:57:21 [INFO] supabase_client: Access record created: 25780cb6-c425-4dca-97ec-6aef9c9d5674 (authorized · usb_0)
+13:57:23 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+13:57:23 [INFO] backend: DETECTADO: Luis (sim=0.667, conf=0.49, resultado=authorized, foto=si)
+13:57:24 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_3b17dd66c132.jpg
+13:57:24 [INFO] supabase_client: Access record created: 73c29772-aa72-4997-8a1e-e4b91df1a632 (authorized · usb_0)
+13:57:26 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+13:57:26 [INFO] backend: DETECTADO: Luis (sim=0.785, conf=0.67, resultado=authorized, foto=si)
+13:57:27 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_baf6eba514ad.jpg
+13:57:28 [INFO] supabase_client: Access record created: 13d5151b-2da6-4ddf-afc2-f54d8f00a390 (not_found · usb_0)
+13:57:28 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=si)
+13:57:33 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_51b718910605.jpg
+13:57:33 [INFO] supabase_client: Access record created: adfc82ce-20ac-40d5-9467-0a60e31bfe5b (not_found · usb_0)
+13:57:33 [INFO] backend: DETECTADO: Desconocido (sim=0.000, conf=0.00, resultado=not_found, foto=si)
+14:32:21 [INFO] face_detector: InsightFace buffalo_l inicializado correctamente
+14:32:22 [INFO] face_detector: Cargados 5 embeddings desde Supabase
+14:32:22 [INFO] offline_queue: OfflineQueue inicializada en F:\Repositorios\reconocimiento-facial\backend\offline_records.db
+14:32:22 [INFO] backend: ==================================================
+14:32:22 [INFO] backend: BioFace - Sistema de Reconocimiento Facial (Headless)
+14:32:22 [INFO] backend: ==================================================
+14:32:22 [INFO] startup_checks: Ejecutando verificaciones de arranque...
+14:32:23 [INFO] startup_checks: Licencia activa: 1291be14-e5e4-4dc3-9776-06967df5c333
+14:32:23 [INFO] startup_checks: Versión actualizada: 0.1.0
+14:32:24 [INFO] device_manager: Dispositivo registrado en Supabase: BF-1AF65303CDAEEB02
+14:32:24 [INFO] device_manager: Heartbeat iniciado (cada 60s)
+14:32:24 [INFO] offline_queue: Daemon offline-sync iniciado (cada 600s)
+14:32:24 [INFO] backend: Caché limpiada — 0.22 MB liberados
+14:32:24 [INFO] backend: Token de autenticación escrito en backend.token
+14:32:24 [INFO] backend: HTTP API en http://127.0.0.1:5050
+14:32:24 [INFO] backend: Watchdog: iniciando bucle de captura...
+14:32:24 [INFO] source_manager: Fuente cerrada
+14:32:24 [INFO] backend: Iniciando bucle de captura headless...
+14:32:24 [WARNING] supabase_client: No se pudo listar snapshots para limpieza: {"statusCode":"400","error":"Error","message":"body must have required property 'prefix'"}
+14:32:25 [INFO] supabase_client: Bucket 'face-snapshots' ya existe
+14:32:25 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=True
+14:32:25 [INFO] source_manager: Fuente cerrada
+14:32:25 [INFO] comtypes.client._code_cache: Imported existing <module 'comtypes.gen' from 'C:\\Users\\Luis Daniel De León\\AppData\\Roaming\\Python\\Python314\\site-packages\\comtypes\\gen\\__init__.py'>
+14:32:25 [INFO] comtypes.client._code_cache: Using writeable comtypes cache directory: 'C:\Users\Luis Daniel De León\AppData\Roaming\Python\Python314\site-packages\comtypes\gen'
+14:32:25 [INFO] source_manager: USB 1 abierta con Auto
+14:32:25 [INFO] source_manager: update_config: fuente activa — usb (1)
+14:32:25 [INFO] backend: Fuente activa: usb (1)
+14:32:25 [INFO] backend: Hilo lector de cámara iniciado
+14:32:25 [INFO] camera_manager: Dispositivos de video reales: ['DroidCam Video', 'OBS Virtual Camera']
+14:32:25 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:32:25 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:32:25 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:32:25 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:32:42 [WARNING] backend: Buffer vacío. Reintentando reconexión...
+14:32:42 [INFO] backend: Hilo lector de cámara finalizado
+14:32:42 [INFO] source_manager: Fuente cerrada
+14:32:43 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=True
+14:32:43 [INFO] source_manager: Fuente cerrada
+14:32:43 [INFO] source_manager: USB 1 abierta con Auto
+14:32:43 [INFO] source_manager: update_config: fuente activa — usb (1)
+14:32:43 [INFO] backend: Hilo lector de cámara iniciado
+14:32:43 [INFO] backend: Reconexión exitosa
+14:33:04 [INFO] camera_manager: Dispositivos de video reales: ['DroidCam Video', 'OBS Virtual Camera']
+14:33:05 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:33:05 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:33:05 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:33:05 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:33:05 [WARNING] source_manager: get_frame error: Unknown C++ exception from OpenCV code
+14:33:09 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=False
+14:33:09 [INFO] source_manager: Fuente cerrada
+14:33:09 [INFO] source_manager: USB 1 abierta con Auto
+14:33:09 [INFO] source_manager: update_config: fuente activa — usb (1)
+14:33:11 [INFO] source_manager: update_config: source_type=usb, manual=None, auto=False
+14:33:11 [INFO] source_manager: Fuente cerrada
+14:33:11 [INFO] source_manager: USB 0 abierta con Auto
+14:33:11 [INFO] source_manager: update_config: fuente activa — usb (0)
+14:33:14 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_35deecea9375.jpg
+14:33:15 [INFO] supabase_client: Access record created: eea12cd7-41c9-4c04-9862-cb1ee605b838 (authorized · usb_0)
+14:33:16 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:33:16 [INFO] backend: DETECTADO: Luis (sim=0.794, conf=0.68, resultado=authorized, foto=si)
+14:35:19 [INFO] supabase_client: Persona creada: Isaias (3f661a8f-347b-4363-bfd8-d4adbc40e432)
+14:35:38 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_isaias_2a2720.jpg
+14:35:40 [INFO] enroll_service: Enrollment exitoso: Isaias → embedding 1f090a6b-222b-4b6a-bad2-86f3f51e57b1
+14:35:41 [INFO] face_detector: Cargados 6 embeddings desde Supabase
+14:35:42 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_efdf65406265.jpg
+14:35:43 [INFO] supabase_client: Access record created: 62c054f5-435c-4b8f-91de-e8518a997aac (authorized · usb_0)
+14:35:44 [INFO] supabase_client: Attendance creada: 6b2cd646-d453-4671-9024-a91ea0abbb87 para 3f661a8f-347b-4363-bfd8-d4adbc40e432
+14:35:45 [INFO] supabase_client: Mark entry registrada: f0ee6344-42f4-4499-8ba6-a5f8c832ffb6
+14:35:45 [INFO] attendance_service: ENTRADA registrada — persona 3f661a8f-347b-4363-bfd8-d4adbc40e432
+14:35:45 [INFO] backend: DETECTADO: Isaias (sim=0.936, conf=0.90, resultado=authorized, foto=si)
+14:35:51 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_isaias_e90e0a.jpg
+14:35:53 [INFO] enroll_service: Enrollment exitoso: Isaias → embedding 20656cd2-b3a8-4d1a-a362-ec2f434c8e99
+14:35:54 [INFO] face_detector: Cargados 7 embeddings desde Supabase
+14:36:03 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_isaias_287587.jpg
+14:36:05 [INFO] enroll_service: Enrollment exitoso: Isaias → embedding cc40e36e-583b-4260-aeb5-36e6fc5965c0
+14:36:06 [INFO] face_detector: Cargados 8 embeddings desde Supabase
+14:36:13 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_isaias_0e3533.jpg
+14:36:13 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_089ae18cc20e.jpg
+14:36:14 [INFO] supabase_client: Access record created: 92ab2cc8-b0c5-41be-879e-c58281fdc094 (authorized · usb_0)
+14:36:14 [INFO] enroll_service: Enrollment exitoso: Isaias → embedding 934ba967-8b9a-4cdf-bd88-7c9c4aa05993
+14:36:15 [INFO] supabase_client: Attendance cerrada: 6b2cd646-d453-4671-9024-a91ea0abbb87
+14:36:16 [INFO] face_detector: Cargados 9 embeddings desde Supabase
+14:36:16 [INFO] supabase_client: Mark exit registrada: f81259e3-0ba8-4290-ad08-7ede60e48e98
+14:36:16 [INFO] attendance_service: SALIDA registrada — persona 3f661a8f-347b-4363-bfd8-d4adbc40e432
+14:36:16 [INFO] backend: DETECTADO: Isaias (sim=0.760, conf=0.63, resultado=authorized, foto=si)
+14:36:28 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_isaias_af95d0.jpg
+14:36:29 [INFO] enroll_service: Enrollment exitoso: Isaias → embedding 93d1b3cc-9864-4cd8-b9eb-30af6917e339
+14:36:31 [INFO] face_detector: Cargados 10 embeddings desde Supabase
+14:36:42 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_7489157f5d77.jpg
+14:36:43 [INFO] supabase_client: Access record created: e2ed10fb-3581-408a-83c0-83d7c051f8c9 (authorized · usb_0)
+14:36:44 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 3f661a8f-347b-4363-bfd8-d4adbc40e432, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:36:44 [INFO] backend: DETECTADO: Isaias (sim=0.518, conf=0.26, resultado=authorized, foto=si)
+14:36:51 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_0445f220404a.jpg
+14:36:51 [INFO] supabase_client: Access record created: cb71730e-7d7b-47ff-9724-8b3dd0debd75 (authorized · usb_0)
+14:36:53 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:36:53 [INFO] backend: DETECTADO: Luis (sim=0.664, conf=0.48, resultado=authorized, foto=si)
+14:36:59 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_b32d057662ce.jpg
+14:36:59 [INFO] supabase_client: Access record created: 1a97289e-fb3c-4d33-abae-4e44db0b9f79 (authorized · usb_0)
+14:37:01 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 3f661a8f-347b-4363-bfd8-d4adbc40e432, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:37:01 [INFO] backend: DETECTADO: Isaias (sim=0.737, conf=0.60, resultado=authorized, foto=si)
+14:37:02 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_2393a5954927.jpg
+14:37:03 [INFO] supabase_client: Access record created: 987fd36c-ce89-4093-b360-37c4da702b08 (authorized · usb_0)
+14:37:04 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:37:04 [INFO] backend: DETECTADO: Luis (sim=0.704, conf=0.54, resultado=authorized, foto=si)
+14:38:23 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_09c957231b56.jpg
+14:38:23 [INFO] supabase_client: Access record created: eade4945-afa8-4435-b3be-de6c3f60432c (authorized · usb_0)
+14:38:25 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:38:25 [INFO] backend: DETECTADO: Luis (sim=0.571, conf=0.34, resultado=authorized, foto=si)
+14:38:27 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_3815988cd18d.jpg
+14:38:27 [INFO] supabase_client: Access record created: e37a478e-82e1-4f8d-beed-eed3b799ccbc (authorized · usb_0)
+14:38:29 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 3f661a8f-347b-4363-bfd8-d4adbc40e432, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:38:29 [INFO] backend: DETECTADO: Isaias (sim=0.472, conf=0.19, resultado=authorized, foto=si)
+14:39:09 [INFO] supabase_client: Persona creada: Mareleine (6516a7c6-308e-4936-8502-c2042ed7ba4f)
+14:39:26 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_mareleine_2c80b8.jpg
+14:39:28 [INFO] enroll_service: Enrollment exitoso: Mareleine → embedding 6d834d2c-fdaa-4a9a-8bb2-e678a32adbf3
+14:39:29 [INFO] face_detector: Cargados 11 embeddings desde Supabase
+14:39:31 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_12dfaf204d7c.jpg
+14:39:31 [INFO] supabase_client: Access record created: d15daa32-e8f9-460b-a0a9-4d0a730c8f02 (authorized · usb_0)
+14:39:33 [INFO] supabase_client: Attendance creada: 3e3d979e-129b-435d-a5c2-5d426a49446a para 6516a7c6-308e-4936-8502-c2042ed7ba4f
+14:39:34 [INFO] supabase_client: Mark entry registrada: ddbdb6d0-a31a-48d1-aa78-f28b5721d39f
+14:39:34 [INFO] attendance_service: ENTRADA registrada — persona 6516a7c6-308e-4936-8502-c2042ed7ba4f
+14:39:34 [INFO] backend: DETECTADO: Mareleine (sim=0.913, conf=0.87, resultado=authorized, foto=si)
+14:39:34 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_mareleine_ab8aaa.jpg
+14:39:35 [INFO] enroll_service: Enrollment exitoso: Mareleine → embedding c0c5a79d-8ab2-42d0-a0fa-37b952c93082
+14:39:37 [INFO] face_detector: Cargados 12 embeddings desde Supabase
+14:39:40 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/enroll_mareleine_95f5c7.jpg
+14:39:42 [INFO] enroll_service: Enrollment exitoso: Mareleine → embedding 7d1d2746-3662-40b4-b5e2-bb603e54911c
+14:39:43 [INFO] face_detector: Cargados 13 embeddings desde Supabase
+14:39:57 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_df86de1f02b5.jpg
+14:39:58 [INFO] supabase_client: Access record created: 56b4e682-6cfb-43fc-88aa-67bb1ccb8520 (authorized · usb_0)
+14:39:59 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 3f661a8f-347b-4363-bfd8-d4adbc40e432, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:39:59 [INFO] backend: DETECTADO: Isaias (sim=0.659, conf=0.48, resultado=authorized, foto=si)
+14:40:06 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_1743dcf80e67.jpg
+14:40:07 [INFO] supabase_client: Access record created: e146c98a-101d-4eba-b9ff-ee18ea32e1f5 (authorized · usb_0)
+14:40:08 [INFO] supabase_client: Attendance cerrada: 3e3d979e-129b-435d-a5c2-5d426a49446a
+14:40:09 [INFO] supabase_client: Mark exit registrada: b6c707f5-e265-4bb4-8271-d284ae551089
+14:40:09 [INFO] attendance_service: SALIDA registrada — persona 6516a7c6-308e-4936-8502-c2042ed7ba4f
+14:40:09 [INFO] backend: DETECTADO: Mareleine (sim=0.537, conf=0.29, resultado=authorized, foto=si)
+14:40:29 [INFO] supabase_client: Snapshot subida: https://gumkpfyrgctrgemqihxl.supabase.co/storage/v1/object/public/face-snapshots/snap_ab63549acff3.jpg
+14:40:29 [INFO] supabase_client: Access record created: 9379e883-c29a-4547-ae2b-3acf764a1362 (authorized · usb_0)
+14:40:31 [WARNING] supabase_client: Error creando attendance: {"code":"23505","details":"Key (company_id, person_id, attendance_date)=(29a16860-65aa-4279-a924-9cc6b10443d8, 4df9209d-ca19-4b4d-9e87-329051508747, 2026-06-07) already exists.","hint":null,"message":"duplicate key value violates unique constraint \"attendances_company_id_person_id_attendance_date_key\""}
+14:40:31 [INFO] backend: DETECTADO: Luis (sim=0.483, conf=0.20, resultado=authorized, foto=si)

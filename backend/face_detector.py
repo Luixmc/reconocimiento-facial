@@ -16,7 +16,12 @@ import cv2
 import numpy as np
 
 from config import MODEL_NAME, MODEL_VERSION
-from config import AUTHORIZED_SIMILARITY, MATCH_MINIMUM_SIMILARITY
+from config import (
+    AMBIGUITY_MARGIN,
+    AUTHORIZED_SIMILARITY,
+    MATCH_MINIMUM_SIMILARITY,
+    MIN_FACE_PIXELS,
+)
 from supabase_client import FaceMatchResult, SupabaseClient
 
 logger = logging.getLogger(__name__)
@@ -62,12 +67,18 @@ class FaceDetector:
             return
 
         try:
+            # IMPORTANTE: debe coincidir con el modelo usado en enrollment.py
+            # (buffalo_l). Si difieren, los embeddings viven en espacios
+            # vectoriales distintos y la similitud da ~0 → todo "Desconocido".
             self._app = FaceAnalysis(
-                name="buffalo_s",
+                name="buffalo_l",
                 providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
             )
-            self._app.prepare(ctx_id=0, det_thresh=0.5)
-            logger.info("InsightFace buffalo_s inicializado correctamente")
+            # det_size 800×800 = detector trabaja sobre una grilla más fina,
+            # mejor para rostros pequeños/lejanos en frames de 720p (priorizamos
+            # precisión sobre recursos). det_thresh 0.5 filtra detecciones débiles.
+            self._app.prepare(ctx_id=0, det_thresh=0.5, det_size=(800, 800))
+            logger.info("InsightFace buffalo_l inicializado correctamente")
             self._ready = True
             # Cargar embeddings conocidos
             self._load_known_embeddings()
@@ -147,31 +158,68 @@ class FaceDetector:
         """Recarga embeddings desde Supabase e invalida caché."""
         self._load_known_embeddings()
 
+    def clear_face_cache(self) -> dict:
+        """
+        Vacía la caché interna de rostros (embeddings_cache.pkl) y los
+        embeddings en memoria, luego intenta recargar fresco desde Supabase.
+        Útil tras re-registrar personas o cambiar de modelo.
+        Retorna {ok, embeddings_loaded, cache_deleted}.
+        """
+        cache_deleted = False
+        try:
+            if _CACHE_PATH.exists():
+                _CACHE_PATH.unlink()
+                cache_deleted = True
+        except Exception as exc:
+            logger.warning("No se pudo borrar la caché de rostros: %s", exc)
+
+        # Vaciar memoria
+        with self._embeddings_lock:
+            self._known_embeddings = []
+            self._emb_matrix = None
+
+        # Recargar fresco desde Supabase (regenera la caché)
+        self._load_known_embeddings()
+        with self._embeddings_lock:
+            loaded = len(self._known_embeddings)
+
+        logger.info("Caché de rostros vaciada (borrada=%s) — recargados %d embeddings",
+                    cache_deleted, loaded)
+        return {"ok": True, "embeddings_loaded": loaded, "cache_deleted": cache_deleted}
+
     # ── Detección ──────────────────────────────────────────────────────
 
     def detect_faces(self, frame: np.ndarray) -> list[dict[str, Any]]:
         """
         Detecta rostros en un frame.
-        Reduce resolución a 320×240 antes de detectar para acelerar ~4x,
-        luego re-escala los bounding boxes a las coordenadas originales.
+        Para máxima fiabilidad procesa a resolución nativa hasta 1280px de
+        ancho (720p), sin reducir la calidad de los recortes que InsightFace
+        usa para extraer los embeddings — más detalle = mejor reconocimiento
+        de rostros lejanos/pequeños. Solo reescala hacia abajo si el frame
+        de la cámara es más grande que eso (para no disparar el costo de
+        cómputo sin necesidad). Re-escala los bounding boxes resultantes a
+        las coordenadas originales y descarta rostros demasiado pequeños,
+        cuyo embedding sería poco fiable y daría falsos positivos.
         Retorna lista de dicts con 'bbox', 'confidence' y (si es posible) 'embedding'.
         """
         if not self._ready:
             return []
 
         if self._app is not None:
-            # ── Downscale para acelerar detección ────────────────────────
+            # ── Procesar a resolución nativa, hasta 1280px (720p) de ancho ──
             h, w = frame.shape[:2]
-            target_w = 320
+            target_w = 1280
             scale = target_w / w
-            target_h = int(h * scale)
             if scale < 1.0:
+                target_h = int(h * scale)
                 small_frame = cv2.resize(frame, (target_w, target_h),
                                           interpolation=cv2.INTER_LINEAR)
             else:
+                # Frame ya es <=1280px: usar tal cual (no interpolar hacia arriba)
+                scale = 1.0
                 small_frame = frame
 
-            # InsightFace sobre frame reducido
+            # InsightFace sobre el frame escalado
             faces = self._app.get(small_frame)
             results = []
             for face in faces:
@@ -179,12 +227,14 @@ class FaceDetector:
                 bbox = face.bbox.astype(int).tolist()
                 if scale < 1.0:
                     inv_scale = 1.0 / scale
-                    bbox = [
-                        int(bbox[0] * inv_scale),
-                        int(bbox[1] * inv_scale),
-                        int(bbox[2] * inv_scale),
-                        int(bbox[3] * inv_scale),
-                    ]
+                    bbox = [int(c * inv_scale) for c in bbox]
+
+                # Filtro de tamaño mínimo: rostros < MIN_FACE_PIXELS de ancho
+                # están demasiado lejos para un reconocimiento confiable.
+                face_w = bbox[2] - bbox[0]
+                if face_w < MIN_FACE_PIXELS:
+                    continue
+
                 results.append({
                     "bbox": bbox,
                     "confidence": float(face.det_score),
@@ -230,18 +280,36 @@ class FaceDetector:
 
             if best_sim > MATCH_MINIMUM_SIMILARITY:
                 best_match = self._known_embeddings[best_idx]
+                best_person = best_match["person_id"]
+
+                # ── Test de ambigüedad ───────────────────────────────────
+                # Mejor similitud de OTRA persona distinta. Si está demasiado
+                # cerca del mejor match, la identidad es ambigua (dos personas
+                # parecidas) → no autorizar para evitar falsos positivos.
+                authorized = best_sim > AUTHORIZED_SIMILARITY
+                runner_up = -1.0
+                for i, e in enumerate(self._known_embeddings):
+                    if e["person_id"] != best_person and float(sims[i]) > runner_up:
+                        runner_up = float(sims[i])
+                if authorized and runner_up > 0 and (best_sim - runner_up) < AMBIGUITY_MARGIN:
+                    logger.info(
+                        "Match ambiguo (best=%.3f vs 2º=%.3f) — no autorizado",
+                        best_sim, runner_up,
+                    )
+                    authorized = False
+
                 confidence = max(
                     0.0,
                     (best_sim - MATCH_MINIMUM_SIMILARITY)
                     / (1.0 - MATCH_MINIMUM_SIMILARITY),
                 )
                 return FaceMatchResult(
-                    person_id=best_match["person_id"],
+                    person_id=best_person,
                     full_name=best_match["full_name"],
                     confidence=min(confidence, 1.0),
                     similarity=best_sim,
                     matched_embedding_id=best_match["embedding_id"],
-                    authorized=best_sim > AUTHORIZED_SIMILARITY,
+                    authorized=authorized,
                 )
 
         return FaceMatchResult()

@@ -43,8 +43,8 @@ from config import (
     MIN_CONFIDENCE_TO_CAPTURE,
     MODEL_NAME,
     MODEL_VERSION,
+    SERVICE_KEY,
     STORAGE_BUCKET,
-    SUPABASE_KEY,
     SUPABASE_URL,
 )
 
@@ -79,8 +79,8 @@ except ImportError:
 class SupabaseClient:
     def __init__(self) -> None:
         self._headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey": SERVICE_KEY,
+            "Authorization": f"Bearer {SERVICE_KEY}",
             "Content-Type": "application/json",
         }
         self._base_url = SUPABASE_URL.rstrip("/")
@@ -118,8 +118,8 @@ class SupabaseClient:
         filename = f"{prefix}_{uuid.uuid4().hex[:8]}.jpg"
         url = f"{self._base_url}/storage/v1/object/{STORAGE_BUCKET}/{filename}"
         headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey": SERVICE_KEY,
+            "Authorization": f"Bearer {SERVICE_KEY}",
             "Content-Type": "image/jpeg",
         }
         resp = requests.post(url, headers=headers, data=image_bytes, timeout=15)

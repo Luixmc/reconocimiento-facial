@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,8 +19,8 @@ from config import (
     CONFIDENCE_THRESHOLD,
     MODEL_NAME,
     MODEL_VERSION,
+    SERVICE_KEY,
     STORAGE_BUCKET,
-    SUPABASE_KEY,
     SUPABASE_URL,
 )
 
@@ -110,8 +111,8 @@ class SupabaseClient:
 
     def __init__(self) -> None:
         self._headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey": SERVICE_KEY,
+            "Authorization": f"Bearer {SERVICE_KEY}",
             "Content-Type": "application/json",
         }
         self._base_url = SUPABASE_URL.rstrip("/")
@@ -150,8 +151,8 @@ class SupabaseClient:
             filename = f"snap_{uuid.uuid4().hex[:12]}.jpg"
         url = f"{self._base_url}/storage/v1/object/{STORAGE_BUCKET}/{filename}"
         upload_headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey": SERVICE_KEY,
+            "Authorization": f"Bearer {SERVICE_KEY}",
             "Content-Type": "image/jpeg",
         }
         resp = requests.post(url, headers=upload_headers, data=image_bytes, timeout=15)
@@ -163,6 +164,72 @@ class SupabaseClient:
             logger.info("Snapshot subida: %s", public_url)
             return public_url
         raise SupabaseUploadError(f"HTTP {resp.status_code}: {resp.text}")
+
+    def cleanup_old_snapshots(self, max_age_hours: float = 24.0) -> int:
+        """
+        Borra del bucket las snapshots más viejas que `max_age_hours`.
+        Solo sirven para que la persona vea cómo quedó su registro el mismo
+        día — no hace falta conservarlas indefinidamente. Retorna cuántas
+        se borraron.
+        """
+        list_url = f"{self._base_url}/storage/v1/object/list/{STORAGE_BUCKET}"
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        to_delete: list[str] = []
+        offset = 0
+        limit = 100
+        try:
+            while True:
+                resp = requests.post(
+                    list_url,
+                    headers=self._headers,
+                    json={"limit": limit, "offset": offset,
+                          "sortBy": {"column": "created_at", "order": "asc"}},
+                    timeout=15,
+                )
+                if not resp.ok:
+                    logger.warning("No se pudo listar snapshots para limpieza: %s", resp.text)
+                    break
+                items = resp.json()
+                if not items:
+                    break
+                for item in items:
+                    name = item.get("name")
+                    created_raw = item.get("created_at")
+                    if not name or not created_raw:
+                        continue
+                    try:
+                        created = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+                    except ValueError:
+                        continue
+                    if created < cutoff:
+                        to_delete.append(name)
+                if len(items) < limit:
+                    break
+                offset += limit
+        except Exception as exc:
+            logger.warning("Error listando snapshots para limpieza: %s", exc)
+            return 0
+
+        if not to_delete:
+            return 0
+
+        delete_url = f"{self._base_url}/storage/v1/object/{STORAGE_BUCKET}"
+        deleted = 0
+        for i in range(0, len(to_delete), 100):
+            batch = to_delete[i:i + 100]
+            try:
+                resp = requests.delete(delete_url, headers=self._headers,
+                                       json={"prefixes": batch}, timeout=20)
+                if resp.ok:
+                    deleted += len(batch)
+                else:
+                    logger.warning("Error borrando snapshots: %s", resp.text)
+            except Exception as exc:
+                logger.warning("Error borrando lote de snapshots: %s", exc)
+
+        if deleted:
+            logger.info("Limpieza de snapshots: %d archivo(s) borrado(s) (>%.0fh)", deleted, max_age_hours)
+        return deleted
 
     # ── Face Embeddings ──────────────────────────────────────────────────
 
@@ -305,6 +372,41 @@ class SupabaseClient:
             logger.info("Attendance creada: %s para %s", attendance_id, person_id)
             return data[0] if isinstance(data, list) else data
         logger.warning("Error creando attendance: %s", resp.text)
+        return None
+
+    def create_person(
+        self,
+        full_name: str,
+        document_number: str | None,
+        position: str | None,
+        created_by_operator_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Crea una nueva persona registrada (registered_persons). Retorna el registro creado."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000000+00:00", time.gmtime())
+        payload = {
+            "id": str(uuid.uuid4()),
+            "company_id": COMPANY_ID,
+            "full_name": full_name,
+            "document_number": document_number,
+            "position": position,
+            "status": "active",
+            "created_by_operator_id": created_by_operator_id,
+            "created_at": now,
+            "updated_at": now,
+        }
+        url = f"{self._base_url}/rest/v1/registered_persons"
+        resp = requests.post(
+            url,
+            headers={**self._headers, "Prefer": "return=representation"},
+            json=payload,
+            timeout=10,
+        )
+        if resp.ok:
+            data = resp.json()
+            person = data[0] if isinstance(data, list) else data
+            logger.info("Persona creada: %s (%s)", full_name, person.get("id"))
+            return person
+        logger.warning("Error creando persona: %s", resp.text)
         return None
 
     def close_attendance(self, attendance_id: str) -> bool:
@@ -508,11 +610,18 @@ class SupabaseClient:
             return False
 
     def check_connection(self) -> bool:
-        """Comprueba si Supabase responde (health check rápido)."""
+        """
+        Comprueba conectividad REAL con Supabase: hace una consulta liviana a
+        la tabla `companies` filtrando por COMPANY_ID. A diferencia de pegarle
+        a la raíz /rest/v1/ (que responde 200 aunque la key no tenga acceso a
+        datos), esto confirma que de verdad podemos leer/escribir la BD —
+        evita el falso "online" cuando los inserts en realidad fallan.
+        """
         try:
-            resp = requests.get(
-                f"{self._base_url}/rest/v1/",
-                headers=self._headers,
+            resp = requests.head(
+                f"{self._base_url}/rest/v1/companies",
+                headers={**self._headers, "Prefer": "count=exact"},
+                params={"id": f"eq.{COMPANY_ID}", "select": "id"},
                 timeout=4,
             )
             return resp.ok

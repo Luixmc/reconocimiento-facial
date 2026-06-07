@@ -326,8 +326,12 @@ def _detect_usb(manager: SourceManager, config: SourceConfig
         for backend_id, backend_name in backends:
             try:
                 cap = cv2.VideoCapture(idx, backend_id)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                # 720p: más detalle para rostros lejanos/pequeños → mejores
+                # embeddings y reconocimiento más fiable (priorizamos calidad
+                # sobre recursos). Si la cámara no soporta 1280x720, OpenCV
+                # cae automáticamente a la resolución nativa más cercana.
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                 cap.set(cv2.CAP_PROP_FPS, 30)
                 if cap.isOpened():
                     ret, _ = cap.read()

@@ -92,6 +92,12 @@ def register_routes(app: Flask, deps: dict[str, Any]) -> None:
         _detector.refresh_embeddings()
         return jsonify({"ok": True})
 
+    @app.route("/api/clear-face-cache", methods=["POST"])
+    def api_clear_face_cache():
+        """Vacía la caché interna de rostros y recarga desde Supabase."""
+        result = _detector.clear_face_cache()
+        return jsonify(result)
+
     # ── Shutdown ──────────────────────────────────────────────────────────
 
     @app.route("/api/shutdown", methods=["POST"])
@@ -222,10 +228,10 @@ def register_routes(app: Flask, deps: dict[str, Any]) -> None:
     @app.route("/api/persons")
     def api_persons():
         """Lista personas registradas disponibles para enrollment."""
-        from config import COMPANY_ID, SUPABASE_KEY, SUPABASE_URL
+        from config import COMPANY_ID, SERVICE_KEY, SUPABASE_URL
         import requests as _req
         url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/registered_persons"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
         params = {
             "select": "id,full_name,document_number,position",
             "company_id": f"eq.{COMPANY_ID}",
@@ -243,6 +249,28 @@ def register_routes(app: Flask, deps: dict[str, Any]) -> None:
         except Exception as exc:
             logger.warning("Error listando personas: %s", exc)
         return jsonify([]), 503
+
+    @app.route("/api/admin/persons", methods=["POST"])
+    def api_admin_create_person():
+        """Crea una nueva persona registrada (registered_persons) desde el panel admin."""
+        if deps.get("supabase") is None:
+            return jsonify({"ok": False, "error": "Supabase no disponible"}), 503
+
+        data = request.get_json(force=True, silent=True) or {}
+        full_name = (data.get("full_name") or "").strip()
+        if not full_name:
+            return jsonify({"ok": False, "error": "full_name requerido"}), 400
+
+        document_number = (data.get("document_number") or "").strip() or None
+        position = (data.get("position") or "").strip() or None
+        operator_id = (data.get("operator_id") or "").strip() or None
+
+        person = deps["supabase"].create_person(full_name, document_number, position, operator_id)
+        if person is None:
+            return jsonify({"ok": False, "error": "No se pudo crear la persona"}), 500
+
+        person["embedding_count"] = 0
+        return jsonify({"ok": True, "person": person})
 
     # ── Admin panel endpoints ─────────────────────────────────────────────
 

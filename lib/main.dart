@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:window_manager/window_manager.dart';
 
+import 'screens/admin_login_screen.dart';
+import 'screens/admin_panel_screen.dart';
 import 'screens/company_login.dart';
 import 'screens/kiosk_pin_screen.dart';
 import 'screens/multi_camera_screen.dart';
@@ -140,6 +142,46 @@ class _BackendState {
   bool supabaseOnline = false;
   int offlinePending = 0;
   String deviceUid = '';
+  RecognitionLiveState recognition = const RecognitionLiveState();
+}
+
+/// Estado de reconocimiento EN VIVO reportado por el backend en cada frame
+/// analizado (independiente de si la detección llegó a persistirse). Se usa
+/// para mostrar mensajes/guías en tiempo real al usuario frente a la cámara.
+class RecognitionLiveState {
+  final bool hasFace;
+  final String phase; // idle | detecting | recognized | low_confidence | unknown
+  final String? personName;
+  final double similarity;
+  final double confidence;
+  final String? quality; // alta | media | baja
+  final double secondsElapsed;
+  final double maxWaitSeconds;
+
+  const RecognitionLiveState({
+    this.hasFace = false,
+    this.phase = 'idle',
+    this.personName,
+    this.similarity = 0,
+    this.confidence = 0,
+    this.quality,
+    this.secondsElapsed = 0,
+    this.maxWaitSeconds = 7,
+  });
+
+  factory RecognitionLiveState.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const RecognitionLiveState();
+    return RecognitionLiveState(
+      hasFace: json['has_face'] as bool? ?? false,
+      phase: json['phase'] as String? ?? 'idle',
+      personName: json['person_name'] as String?,
+      similarity: (json['similarity'] as num?)?.toDouble() ?? 0,
+      confidence: (json['confidence'] as num?)?.toDouble() ?? 0,
+      quality: json['quality'] as String?,
+      secondsElapsed: (json['seconds_elapsed'] as num?)?.toDouble() ?? 0,
+      maxWaitSeconds: (json['max_wait_seconds'] as num?)?.toDouble() ?? 7,
+    );
+  }
 }
 
 // ─── Pantalla principal ───────────────────────────────────────────────────────
@@ -159,7 +201,7 @@ class RecognitionScreen extends StatefulWidget {
 }
 
 class _RecognitionScreenState extends State<RecognitionScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _backendManager = BackendManager();
   final _backendState = _BackendState();
   final _sourceService = SourceService();
@@ -184,10 +226,18 @@ class _RecognitionScreenState extends State<RecognitionScreen>
   int _titleTapCount = 0;
   Timer? _tapResetTimer;
 
+  // Pulso de "brillo" para que las guías de reconocimiento llamen más la
+  // atención (reconocido / no registrado / confirmando) sin saturar la UI.
+  late final AnimationController _pulseController;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
     _startBackend();
   }
 
@@ -198,6 +248,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     _frameTimer?.cancel();
     _autoRestartTimer?.cancel();
     _tapResetTimer?.cancel();
+    _pulseController.dispose();
     BackendManager.killAll();
     super.dispose();
   }
@@ -232,6 +283,24 @@ class _RecognitionScreenState extends State<RecognitionScreen>
       ),
       (_) => false,
     );
+  }
+
+  /// Pide credenciales de operador admin/superadmin y, si son válidas,
+  /// abre el panel de administración (registro y enrolamiento de personas).
+  void _openAdminPanel() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => AdminLoginScreen(
+        companyId: widget.companyId,
+        onLoginSuccess: (session) {
+          Navigator.of(context).pushReplacement(MaterialPageRoute(
+            builder: (_) => AdminPanelScreen(
+              companyName: widget.companyName,
+              operatorSession: session,
+            ),
+          ));
+        },
+      ),
+    ));
   }
 
   Future<void> _startBackend() async {
@@ -288,16 +357,19 @@ class _RecognitionScreenState extends State<RecognitionScreen>
   void _startPolling() {
     _autoRestartAttempts = 0; // reset backoff al conectar exitosamente
     _pollTimer?.cancel();
-    _pollTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _fetchStatus());
+    // Polling más frecuente para que la guía de reconocimiento (countdown,
+    // calidad, fase) se sienta en vivo en vez de a saltos de 1s.
+    _pollTimer = Timer.periodic(
+        const Duration(milliseconds: 400), (_) => _fetchStatus());
     _fetchStatus();
     _startFrameStream();
   }
 
   void _startFrameStream() {
     _frameTimer?.cancel();
+    // Cámara más fluida: priorizamos suavidad sobre uso de recursos.
     _frameTimer = Timer.periodic(
-        const Duration(milliseconds: 200), (_) => _fetchFrame());
+        const Duration(milliseconds: 80), (_) => _fetchFrame());
     _fetchFrame();
   }
 
@@ -341,6 +413,8 @@ class _RecognitionScreenState extends State<RecognitionScreen>
               data['offline_pending'] as int? ?? 0;
           _backendState.deviceUid =
               data['device_uid'] as String? ?? '';
+          _backendState.recognition = RecognitionLiveState.fromJson(
+              data['recognition'] as Map<String, dynamic>?);
         });
       }
     } catch (_) {
@@ -461,6 +535,62 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     }
   }
 
+  // ─── Vaciar caché de rostros (BD interna de embeddings) ────────────────────
+
+  Future<void> _clearFaceCache() async {
+    // Confirmar: esta acción recarga los rostros desde Supabase
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        title: const Text('Vaciar caché de rostros',
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Se borrará la caché interna de rostros y se recargarán desde '
+          'Supabase. Útil tras registrar o actualizar personas.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Vaciar y recargar',
+                style: TextStyle(color: Colors.cyanAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final response = await BackendClient.instance
+          .post('/api/clear-face-cache')
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final loaded = data['embeddings_loaded'] as int? ?? 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(
+              'Caché de rostros vaciada — $loaded rostros recargados desde Supabase')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al vaciar caché de rostros: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al vaciar caché de rostros: $e')),
+      );
+    }
+  }
+
   // ─── Kiosk exit ───────────────────────────────────────────────────────────
 
   Future<void> _handleKioskExit() async {
@@ -573,6 +703,11 @@ class _RecognitionScreenState extends State<RecognitionScreen>
               );
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.admin_panel_settings_outlined, size: 22),
+            tooltip: 'Panel de administración (registrar / enrolar personas)',
+            onPressed: _openAdminPanel,
+          ),
           // Menú de mantenimiento
           if (_backendReady)
             PopupMenuButton<String>(
@@ -581,6 +716,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
               onSelected: (value) {
                 if (value == 'export_db') _exportOfflineDb();
                 if (value == 'clear_cache') _clearCache();
+                if (value == 'clear_faces') _clearFaceCache();
               },
               itemBuilder: (_) => const [
                 PopupMenuItem(
@@ -597,6 +733,14 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                     Icon(Icons.cleaning_services_outlined, size: 18),
                     SizedBox(width: 10),
                     Text('Limpiar caché'),
+                  ]),
+                ),
+                PopupMenuItem(
+                  value: 'clear_faces',
+                  child: Row(children: [
+                    Icon(Icons.face_retouching_off_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('Vaciar caché de rostros'),
                   ]),
                 ),
               ],
@@ -869,90 +1013,216 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     );
   }
 
+  /// Tarjeta-guía con el estado de reconocimiento EN VIVO (no depende de que
+  /// la detección se haya persistido — se actualiza en cada frame analizado).
   Widget _buildDetectionCard() {
-    final detection = _backendState.lastDetection;
-    if (detection == null) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E2E),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white10),
+    final rec = _backendState.recognition;
+
+    String stateKey;
+    Widget card;
+
+    if (!rec.hasFace) {
+      stateKey = 'no_face';
+      card = _buildGuideCard(
+        icon: Icons.center_focus_weak,
+        iconColor: Colors.white38,
+        color: Colors.white38,
+        title: 'Colóquese frente a la cámara',
+        subtitle: 'El reconocimiento empieza apenas se detecte un rostro',
+      );
+    } else {
+      switch (rec.phase) {
+        case 'recognized':
+          stateKey = 'recognized';
+          card = _buildGuideCard(
+            icon: Icons.check_circle,
+            iconColor: Colors.greenAccent,
+            color: Colors.greenAccent,
+            title: '¡${rec.personName ?? "Persona"} reconocido/a! ✓',
+            subtitle:
+                'ACCESO AUTORIZADO · Calidad ${_qualityLabel(rec.quality)} '
+                '(${(rec.similarity * 100).toStringAsFixed(0)}% de similitud)',
+            pulse: true,
+            big: true,
+          );
+          break;
+
+        case 'low_confidence':
+          stateKey = 'low_confidence';
+          card = _buildGuideCard(
+            icon: Icons.warning_amber_rounded,
+            iconColor: Colors.orangeAccent,
+            color: Colors.orangeAccent,
+            title: '${rec.personName ?? "Posible coincidencia"} — confirmando…',
+            subtitle: 'Calidad ${_qualityLabel(rec.quality)} '
+                '(${(rec.similarity * 100).toStringAsFixed(0)}%). '
+                '¡Acérquese y mire directo a la cámara para confirmar!',
+            pulse: true,
+          );
+          break;
+
+        case 'unknown':
+          stateKey = 'unknown';
+          card = _buildGuideCard(
+            icon: Icons.person_off_outlined,
+            iconColor: Colors.redAccent,
+            color: Colors.redAccent,
+            title: '⚠ Persona no registrada',
+            subtitle: 'No se tomará el registro de entrada/salida. '
+                'Si debería estar registrada, contacte al administrador para inscribirla.',
+            pulse: true,
+          );
+          break;
+
+        case 'detecting':
+        default:
+          stateKey = 'detecting';
+          final maxWait = rec.maxWaitSeconds <= 0 ? 7.0 : rec.maxWaitSeconds;
+          final progress = (rec.secondsElapsed / maxWait).clamp(0.0, 1.0);
+          card = _buildGuideCard(
+            icon: Icons.search,
+            iconColor: Colors.cyanAccent,
+            color: Colors.cyanAccent,
+            title: 'Reconociendo…',
+            subtitle: 'Mire directo a la cámara y manténgase quieto '
+                '(${rec.secondsElapsed.toStringAsFixed(0)}s / ${maxWait.toStringAsFixed(0)}s)',
+            progress: progress,
+          );
+      }
+    }
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.97, end: 1.0).animate(animation),
+          child: child,
         ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+      ),
+      child: KeyedSubtree(key: ValueKey(stateKey), child: card),
+    );
+  }
+
+  String _qualityLabel(String? quality) {
+    switch (quality) {
+      case 'alta':
+        return 'buena';
+      case 'media':
+        return 'regular — acérquese más';
+      case 'baja':
+        return 'baja — mejore la iluminación';
+      default:
+        return '—';
+    }
+  }
+
+  /// Tarjeta de guía/notificación en pantalla.
+  /// [pulse] hace que el brillo del borde y el ícono "respiren" para llamar
+  /// la atención en estados que requieren acción del usuario (reconocido,
+  /// confirmando, no registrado). [big] resalta aún más el texto y el ícono
+  /// para el momento clave: "acceso autorizado".
+  Widget _buildGuideCard({
+    required IconData icon,
+    required Color iconColor,
+    required Color color,
+    required String title,
+    required String subtitle,
+    double? progress,
+    bool pulse = false,
+    bool big = false,
+  }) {
+    final iconSize = big ? 40.0 : 30.0;
+    final titleSize = big ? 21.0 : 17.0;
+    final subtitleSize = big ? 15.0 : 13.5;
+
+    Widget buildCard(double glow) {
+      return Container(
+        padding: EdgeInsets.all(big ? 20 : 16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF1E1E2E),
+              Color.lerp(const Color(0xFF1E1E2E), color, 0.16 + 0.10 * glow)!,
+            ],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: color.withValues(alpha: 0.35 + 0.4 * glow),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.15 + 0.30 * glow),
+              blurRadius: 16 + 16 * glow,
+              spreadRadius: big ? 1.5 : 0.5,
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.info_outline, color: Colors.white24, size: 18),
-            SizedBox(width: 8),
-            Text('Colóquese frente a la cámara para iniciar',
-                style: TextStyle(color: Colors.white38, fontSize: 14)),
+            Container(
+              padding: EdgeInsets.all(big ? 12 : 9),
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.15 + 0.10 * glow),
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: iconColor.withValues(alpha: 0.25 + 0.35 * glow),
+                    blurRadius: 14,
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: iconColor, size: iconSize),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: titleSize,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2)),
+                  const SizedBox(height: 5),
+                  Text(subtitle,
+                      style: TextStyle(
+                          color: color,
+                          fontSize: subtitleSize,
+                          fontWeight: big ? FontWeight.w600 : FontWeight.normal,
+                          height: 1.3)),
+                  if (progress != null) ...[
+                    const SizedBox(height: 10),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(5),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 5,
+                        backgroundColor: Colors.white12,
+                        valueColor: AlwaysStoppedAnimation<Color>(color),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ],
         ),
       );
     }
 
-    final personName = detection['full_name'] as String? ?? 'Desconocido';
-    final result = detection['result'] as String? ?? 'unknown';
-    final similarity = (detection['similarity'] as num?) ?? 0;
-    final isAuthorized = result == 'authorized';
-    final resultColor =
-        isAuthorized ? Colors.greenAccent : Colors.orangeAccent;
-    final resultIcon = isAuthorized ? Icons.check_circle : Icons.help;
+    if (!pulse) return buildCard(0.0);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E2E),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isAuthorized
-              ? Colors.greenAccent.withValues(alpha: 0.3)
-              : Colors.orangeAccent.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Row(children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: resultColor.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(resultIcon, color: resultColor, size: 28),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(personName,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(
-                'Similitud: ${(similarity * 100).toStringAsFixed(1)}% · '
-                '${isAuthorized ? "Autorizado" : "No registrado"}',
-                style: TextStyle(color: resultColor, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-        if (_backendState.status == 'running')
-          Container(
-            width: 8, height: 8,
-            decoration: BoxDecoration(
-              color: Colors.greenAccent,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.greenAccent.withValues(alpha: 0.5),
-                  blurRadius: 4,
-                ),
-              ],
-            ),
-          ),
-      ]),
+    return AnimatedBuilder(
+      animation: _pulseController,
+      builder: (context, _) => buildCard(_pulseController.value),
     );
   }
 }

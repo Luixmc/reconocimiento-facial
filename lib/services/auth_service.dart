@@ -75,7 +75,7 @@ class AuthService {
               'Authorization': 'Bearer $_supabaseAnonKey',
               'Content-Type':  'application/json',
             },
-            body: jsonEncode({'p_company_id': input}),
+            body: jsonEncode({'p_access_id': input}),
           )
           .timeout(const Duration(seconds: 10));
 
@@ -86,14 +86,18 @@ class AuthService {
         );
       }
 
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-
-      if (data['valid'] != true) {
-        return AuthResult(valid: false, error: data['error'] as String? ?? 'Login inválido');
+      final rows = jsonDecode(resp.body) as List<dynamic>;
+      if (rows.isEmpty) {
+        return const AuthResult(valid: false, error: 'Empresa no encontrada');
       }
 
-      final companyId   = data['company_id']   as String;
-      final companyName = data['company_name'] as String;
+      final row = rows.first as Map<String, dynamic>;
+      if (row['license_ok'] != true) {
+        return const AuthResult(valid: false, error: 'Sin licencia activa para esta empresa');
+      }
+
+      final companyId   = row['company_id']   as String;
+      final companyName = row['company_name'] as String;
 
       await _saveSession(companyId, companyName);
       return AuthResult(valid: true, companyId: companyId, companyName: companyName);

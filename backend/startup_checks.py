@@ -12,7 +12,7 @@ import os
 
 import requests
 
-from config import COMPANY_ID, SUPABASE_KEY, SUPABASE_URL
+from config import COMPANY_ID, SERVICE_KEY, SUPABASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ def check_license() -> bool:
     """
     url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/licenses"
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SERVICE_KEY,
+        "Authorization": f"Bearer {SERVICE_KEY}",
     }
     params = {
         "select": "id,status,expires_at",
@@ -65,8 +65,8 @@ def check_for_update() -> dict | None:
     """
     url = f"{SUPABASE_URL.rstrip('/')}/rest/v1/app_versions"
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SERVICE_KEY,
+        "Authorization": f"Bearer {SERVICE_KEY}",
     }
     params = {
         "select": "version,download_url,release_notes,is_mandatory",

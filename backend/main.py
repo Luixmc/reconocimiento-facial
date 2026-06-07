@@ -32,15 +32,19 @@ sys.path.insert(0, str(BASE_DIR))
 from source_manager import SourceManager, SourceConfig
 from config import (
     APP_VERSION,
+    AUTHORIZED_CAPTURE_COOLDOWN_SECONDS,
+    AUTHORIZED_SIMILARITY,
     COMPANY_ID,
     DEFAULT_CAMERA_INDEX,
     DETECTION_FRAME_SKIP,
     FACE_LEAVE_TIMEOUT,
     CAPTURE_COOLDOWN_SECONDS,
+    MATCH_MINIMUM_SIMILARITY,
     MIN_CONFIDENCE_TO_CAPTURE,
     FLASK_HOST,
     FLASK_PORT,
     SNAPSHOT_QUALITY,
+    UNKNOWN_FACE_TIMEOUT_SECONDS,
 )
 from device_manager import DeviceManager, get_or_create_device_uid
 from offline_queue import OfflineQueue
@@ -87,6 +91,19 @@ _state = {
     "last_detection": None,
     "last_snapshot_url": None,
     "last_person_name": None,
+    # Estado de reconocimiento EN VIVO (se actualiza en cada frame analizado,
+    # independientemente de si la detección se persiste o no). Lo consume la UI
+    # para mostrar mensajes/guías ("Reconociendo...", "No registrado", etc).
+    "recognition": {
+        "has_face": False,
+        "phase": "idle",          # idle | detecting | recognized | low_confidence | unknown
+        "person_name": None,
+        "similarity": 0.0,
+        "confidence": 0.0,
+        "quality": None,          # alta | media | baja
+        "seconds_elapsed": 0.0,
+        "max_wait_seconds": UNKNOWN_FACE_TIMEOUT_SECONDS,
+    },
     "fps": 0,
     "total_detections": 0,
     # SaaS extras (device_uid se actualiza en main() tras inicializar _DEVICE_UID)
@@ -115,6 +132,31 @@ _last_capture_time: float = 0.0
 _last_person_id: str | None = None      # última persona detectada
 _last_person_time: float = 0.0          # cuándo se detectó por última vez
 _last_face_present_time: float = 0.0    # cuándo se vio un rostro por última vez
+_face_seen_since: float | None = None    # cuándo apareció el rostro actual (para el contador de 7s)
+
+
+def _quality_label(similarity: float) -> str | None:
+    """Etiqueta de calidad del match para mostrar en la guía de pantalla."""
+    if similarity <= 0:
+        return None
+    if similarity >= AUTHORIZED_SIMILARITY:
+        return "alta"
+    if similarity >= MATCH_MINIMUM_SIMILARITY:
+        return "media"
+    return "baja"
+
+
+def _idle_recognition_state() -> dict:
+    return {
+        "has_face": False,
+        "phase": "idle",
+        "person_name": None,
+        "similarity": 0.0,
+        "confidence": 0.0,
+        "quality": None,
+        "seconds_elapsed": 0.0,
+        "max_wait_seconds": UNKNOWN_FACE_TIMEOUT_SECONDS,
+    }
 
 # ── Buffer de frames para hilo lector de cámara ─────────────────────────
 _frame_buffer: queue.Queue = queue.Queue(maxsize=2)
@@ -181,13 +223,25 @@ def cleanup_cache() -> float:
 
 
 def _periodic_cleanup_loop():
-    """Limpia caché cada 6 horas mientras el backend está activo."""
+    """
+    Limpia caché local y snapshots viejas cada 6 horas mientras el backend
+    está activo. Las fotos de Storage solo sirven para que la persona vea
+    cómo quedó su registro EL MISMO DÍA — pasadas 24h se borran solas.
+    """
     # Primera ejecución al arrancar (limpia restos de sesión anterior)
     cleanup_cache()
+    try:
+        _supabase.cleanup_old_snapshots(max_age_hours=24.0)
+    except Exception:
+        logger.exception("Error en limpieza inicial de snapshots")
     while not _shutdown.is_set():
         _shutdown.wait(timeout=6 * 3600)  # cada 6 horas
         if not _shutdown.is_set():
             cleanup_cache()
+            try:
+                _supabase.cleanup_old_snapshots(max_age_hours=24.0)
+            except Exception:
+                logger.exception("Error en limpieza periódica de snapshots")
 
 
 # --------------------------------------------------------------------------
@@ -199,7 +253,10 @@ def should_capture(match, has_face: bool) -> bool:
     Decide si se debe capturar una foto ahora mismo.
     Reglas:
       1. Debe haber un rostro presente.
-      2. Si la misma persona sigue en cuadro, esperar CAPTURE_COOLDOWN.
+      2. Si la misma persona sigue en cuadro, esperar su cooldown: las
+         personas YA AUTORIZADAS usan AUTHORIZED_CAPTURE_COOLDOWN_SECONDS
+         (más largo, p.ej. 30s) para no duplicar su registro de acceso si
+         se quedan paradas frente a la cámara; el resto usa CAPTURE_COOLDOWN.
       3. Si es una persona nueva (o desconocida), capturar de inmediato.
       4. Si no hay rostro por más de FACE_LEAVE_TIMEOUT, resetear estado.
     """
@@ -217,11 +274,16 @@ def should_capture(match, has_face: bool) -> bool:
 
     # Determinar identidad actual
     current_id = match.person_id if match else None  # None = desconocido
+    person_cooldown = (
+        AUTHORIZED_CAPTURE_COOLDOWN_SECONDS
+        if (match is not None and match.authorized)
+        else CAPTURE_COOLDOWN_SECONDS
+    )
 
     # ── Rate limiting por persona ───────────────────────────────────────
-    # Si es la misma persona detectada antes, respetar cooldown
+    # Si es la misma persona detectada antes, respetar su cooldown
     if current_id == _last_person_id and current_id is not None:
-        if now - _last_person_time < CAPTURE_COOLDOWN_SECONDS:
+        if now - _last_person_time < person_cooldown:
             return False
     elif current_id is None and _last_person_id is None:
         # Desconocido tras desconocido: cooldown también
@@ -241,10 +303,13 @@ def should_capture(match, has_face: bool) -> bool:
 
 def reset_rate_limit():
     """Resetea el rate limiter (útil al cambiar de cámara)."""
-    global _last_capture_time, _last_person_id, _last_person_time, _last_face_present_time
+    global _last_capture_time, _last_person_id, _last_person_time, _last_face_present_time, _face_seen_since
     _last_capture_time = 0.0
     _last_person_id = None
     _last_person_time = 0.0
+    _face_seen_since = None
+    with _state_lock:
+        _state["recognition"] = _idle_recognition_state()
     _last_face_present_time = 0.0
 
 
@@ -365,10 +430,11 @@ def _camera_reader():
 
 
 def _process_detection_async(record: AccessRecord, snap_bytes: bytes | None,
-                              match, person_id: str | None):
+                              match, person_id: str):
     """
-    Procesa una detección (insert + upload + attendance) en un hilo separado
-    para no bloquear el bucle de captura.
+    Procesa una detección de una persona REGISTRADA (insert + upload +
+    attendance) en un hilo separado para no bloquear el bucle de captura.
+    Solo se invoca cuando hubo match (nunca para "Desconocido").
     """
     def _worker():
         try:
@@ -398,20 +464,17 @@ def _process_detection_async(record: AccessRecord, snap_bytes: bytes | None,
                 if snap_url:
                     _state["last_detection"] = {
                         "person_id": person_id,
-                        "full_name": getattr(match, 'full_name', 'Desconocido') if match else 'Desconocido',
-                        "confidence": getattr(match, 'confidence', 0.0) if match else 0.0,
-                        "similarity": getattr(match, 'similarity', 0.0) if match else 0.0,
+                        "full_name": match.full_name,
+                        "confidence": match.confidence,
+                        "similarity": match.similarity,
                         "result": record.result,
                         "snapshot_url": snap_url,
                     }
-                    _state["last_person_name"] = getattr(match, 'full_name', 'Desconocido') if match else 'Desconocido'
+                    _state["last_person_name"] = match.full_name
 
-            person_name = getattr(match, 'full_name', 'Desconocido') if match else 'Desconocido'
-            sim = getattr(match, 'similarity', 0.0) if match else 0.0
-            conf = getattr(match, 'confidence', 0.0) if match else 0.0
             logger.info(
                 "DETECTADO: %s (sim=%.3f, conf=%.2f, resultado=%s, foto=%s)",
-                person_name, sim, conf, record.result,
+                match.full_name, match.similarity, match.confidence, record.result,
                 "si" if snap_url else "no",
             )
         except Exception as exc:
@@ -433,8 +496,11 @@ def capture_loop():
     La UI (video en vivo) la sirve via HTTP (/api/snapshot) para Flutter.
     Si la cámara actual falla, intenta con la siguiente disponible.
     """
+    global _face_seen_since
+
     logger.info("Iniciando bucle de captura headless...")
     reset_rate_limit()
+    _face_seen_since = None
 
     _supabase.ensure_storage_bucket()
 
@@ -525,12 +591,21 @@ def capture_loop():
             # Detectar rostros
             faces = _detector.detect_faces(frame)
             has_face = len(faces) > 0
+            now = time.time()
 
             if not has_face:
                 should_capture(None, has_face=False)
+                # Si el rostro lleva ausente más de FACE_LEAVE_TIMEOUT, volver
+                # la guía de pantalla a estado inactivo y reiniciar el contador.
+                if _face_seen_since is not None and now - _last_face_present_time > FACE_LEAVE_TIMEOUT:
+                    _face_seen_since = None
+                    with _state_lock:
+                        _state["recognition"] = _idle_recognition_state()
                 continue
 
-            face = faces[0]
+            # Si hay varios rostros, usar el de mayor confianza de detección
+            # (más fiable que tomar siempre el primero del listado).
+            face = max(faces, key=lambda f: f.get("confidence", 0.0))
             confidence = float(face.get("confidence", 0.0))
             embedding = face.get("embedding")
 
@@ -538,8 +613,48 @@ def capture_loop():
             if embedding is not None:
                 match = _detector.recognize(embedding)
 
+            # ── Guía de reconocimiento EN VIVO ───────────────────────────
+            # Se actualiza en cada frame analizado (independiente de si se
+            # persiste o no) para que la UI muestre mensajes en tiempo real:
+            # "Reconociendo...", calidad del match, y el aviso de "no
+            # registrado" tras UNKNOWN_FACE_TIMEOUT_SECONDS sin éxito.
+            if _face_seen_since is None:
+                _face_seen_since = now
+            elapsed = now - _face_seen_since
+
+            if match and match.authorized:
+                phase = "recognized"
+            elif match:
+                phase = "low_confidence"
+            elif elapsed >= UNKNOWN_FACE_TIMEOUT_SECONDS:
+                phase = "unknown"
+            else:
+                phase = "detecting"
+
+            with _state_lock:
+                _state["recognition"] = {
+                    "has_face": True,
+                    "phase": phase,
+                    "person_name": match.full_name if match else None,
+                    "similarity": match.similarity if match else 0.0,
+                    "confidence": match.confidence if match else 0.0,
+                    "quality": _quality_label(match.similarity if match else 0.0),
+                    "seconds_elapsed": round(elapsed, 1),
+                    "max_wait_seconds": UNKNOWN_FACE_TIMEOUT_SECONDS,
+                }
+
             if confidence < MIN_CONFIDENCE_TO_CAPTURE:
                 continue
+
+            # Solo se registra entrada/salida de personas REGISTRADAS y
+            # AUTORIZADAS (match confiable, sin ambigüedad): si no hay match
+            # o el match no es lo bastante confiable, no se crea access_record,
+            # no se sube snapshot ni se toca attendance — un "Desconocido" o
+            # un match dudoso no aporta valor al historial de accesos, y la
+            # guía en pantalla ya informa "no registrado" / "baja calidad".
+            if match is None or not match.authorized:
+                continue
+
             if not should_capture(match, has_face=True):
                 continue
 
@@ -548,12 +663,12 @@ def capture_loop():
             if snap is None:
                 continue
 
-            person_id = match.person_id if match else None
-            person_name = match.full_name if match else "Desconocido"
-            conf = match.confidence if match else 0.0
-            sim = match.similarity if match else 0.0
-            embedding_id = match.matched_embedding_id if match else None
-            result = "authorized" if (match and match.authorized) else "not_found"
+            person_id = match.person_id
+            person_name = match.full_name
+            conf = match.confidence
+            sim = match.similarity
+            embedding_id = match.matched_embedding_id
+            result = "authorized"
 
             # Obtener source_id para el registro
             src_id = _source.status().get("source_id", str(DEFAULT_CAMERA_INDEX))

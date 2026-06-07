@@ -118,10 +118,10 @@ class EnrollService:
         }
 
         import requests as _req
-        from config import SUPABASE_KEY, SUPABASE_URL
+        from config import SERVICE_KEY, SUPABASE_URL
         headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey": SERVICE_KEY,
+            "Authorization": f"Bearer {SERVICE_KEY}",
             "Content-Type": "application/json",
             "Prefer": "return=minimal",
         }

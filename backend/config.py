@@ -12,7 +12,10 @@ load_dotenv(_env_path)
 
 # ─── Supabase ──────────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+# Service role: el backend es un servicio de confianza (escanea/escribe ya
+# filtrando por COMPANY_ID), así que usa esta key para saltar RLS en sus
+# llamadas REST/Storage en lugar de la publishable key (sujeta a RLS de panel).
+SERVICE_KEY = os.environ["SERVICE_KEY"]
 COMPANY_ID = os.environ["COMPANY_ID"]
 
 # ─── Cámara ────────────────────────────────────────────────────────────────
@@ -20,9 +23,17 @@ DEFAULT_CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", "1"))
 CAPTURE_INTERVAL_SECONDS = 0.5  # Mínimo entre capturas para evitar duplicados
 
 # ─── Detección facial ──────────────────────────────────────────────────────
+# Umbrales calibrados para embeddings ArcFace de buffalo_l (coseno).
+# Para personas distintas el coseno suele caer < 0.3; misma persona > 0.45.
 CONFIDENCE_THRESHOLD = 0.5    # Umbral de confianza para considerar match
-MATCH_MINIMUM_SIMILARITY = 0.3  # Similitud mínima para considerar match
-AUTHORIZED_SIMILARITY = 0.5     # Similitud mínima para autorizar acceso
+MATCH_MINIMUM_SIMILARITY = 0.35  # Similitud mínima para considerar match (candidato)
+AUTHORIZED_SIMILARITY = 0.45     # Similitud mínima para AUTORIZAR el acceso
+# Margen mínimo entre el mejor match y la 2ª persona más parecida. Si dos
+# personas distintas quedan más cerca que esto, el match es ambiguo → no autoriza.
+AMBIGUITY_MARGIN = 0.08
+# Ancho mínimo del rostro (px, en coords originales) para intentar reconocer.
+# Rostros más pequeños están demasiado lejos y producen falsos positivos.
+MIN_FACE_PIXELS = 70
 MODEL_NAME = "insightface"
 MODEL_VERSION = "0.7.3"
 
@@ -32,11 +43,17 @@ FLASK_PORT = int(os.environ.get("FLASK_PORT", "5050"))
 
 # ─── Rate Limiting (SaaS: evitar spam a Supabase) ──────────────────────────
 CAPTURE_COOLDOWN_SECONDS = 3.0  # Mínimo entre capturas para la MISMA persona
+# Personas YA AUTORIZADAS: cooldown más largo para no llenar el historial de
+# accesos con registros repetidos de alguien que se queda parado frente a la cámara.
+AUTHORIZED_CAPTURE_COOLDOWN_SECONDS = 30.0
 FACE_LEAVE_TIMEOUT = 5.0         # Segundos sin rostro para considerar que "salió"
 MIN_CONFIDENCE_TO_CAPTURE = 0.7  # Confianza mínima para considerar detección "perfecta"
 # Frame skip: cuántos frames saltarse antes de ejecutar InsightFace.
-# Con 15 cámaras simultáneas se recomienda 5-8 para reducir carga de CPU.
-DETECTION_FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "3"))
+# Priorizamos fluidez/fiabilidad sobre uso de recursos: detectar en cada frame.
+DETECTION_FRAME_SKIP = int(os.environ.get("FRAME_SKIP", "1"))
+# Tiempo máximo intentando reconocer un rostro antes de declararlo "no registrado"
+# y mostrar la guía correspondiente en pantalla (la persona sigue sin registrarse).
+UNKNOWN_FACE_TIMEOUT_SECONDS = 7.0
 
 # ─── Dispositivo ──────────────────────────────────────────────────────────
 # Versión de la app (usada para OTA y heartbeat)

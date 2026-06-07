@@ -223,8 +223,10 @@ class CameraManager:
             for backend_id, backend_name in backends:
                 try:
                     cap = cv2.VideoCapture(index, backend_id)
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    # 720p para coincidir con el pipeline de detección — más
+                    # resolución nativa = mejor calidad de embeddings.
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                     cap.set(cv2.CAP_PROP_FPS, 30)
                     if cap.isOpened():
                         self._cap = cap
