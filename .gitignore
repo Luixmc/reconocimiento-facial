@@ -1,5 +1,10 @@
 # BioFace - .gitignore
 
+# Secrets
+backend/.env
+backend/backend.token
+.env
+
 # Python backend
 backend/backend.log
 backend/backend.log.*

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'backend_client.dart';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Modelos
@@ -188,37 +188,19 @@ class DroidcamScanResult {
 
 /// Servicio que consume los endpoints /api/source/* del backend Python.
 class SourceService {
-  final String host;
-  final int port;
-  final Duration timeout;
-
-  const SourceService({
-    this.host = '127.0.0.1',
-    this.port = 5050,
-    this.timeout = const Duration(seconds: 5),
-  });
-
-  Uri _uri(String path) => Uri.parse('http://$host:$port$path');
-
-  Map<String, String> get _jsonHeaders => {
-        'Content-Type': 'application/json',
-      };
+  final _client = BackendClient.instance;
 
   // ── GET /api/source/status ───────────────────────────────────────────
 
   /// Estado actual de la fuente de video activa.
   Future<SourceStatus> getStatus() async {
     try {
-      final response = await http
-          .get(_uri('/api/source/status'))
-          .timeout(timeout);
+      final response = await _client.get('/api/source/status');
       if (response.statusCode == 200) {
-        final json = jsonDecode(response.body) as Map<String, dynamic>;
-        return SourceStatus.fromJson(json);
+        return SourceStatus.fromJson(
+            jsonDecode(response.body) as Map<String, dynamic>);
       }
-    } catch (e) {
-      // Timeout o error de conexión
-    }
+    } catch (_) {}
     return const SourceStatus(error: 'No se pudo obtener el estado');
   }
 
@@ -227,81 +209,42 @@ class SourceService {
   /// Lista todas las fuentes disponibles (USB + DroidCam).
   Future<List<SourceInfo>> listSources() async {
     try {
-      final response = await http
-          .get(_uri('/api/source/list'))
-          .timeout(timeout);
+      final response = await _client.get('/api/source/list');
       if (response.statusCode == 200) {
-        final List<dynamic> jsonList = jsonDecode(response.body);
-        return jsonList
+        final list = jsonDecode(response.body) as List<dynamic>;
+        return list
             .cast<Map<String, dynamic>>()
-            .map((j) => SourceInfo.fromJson(j))
+            .map(SourceInfo.fromJson)
             .toList();
       }
-    } catch (e) {
-      // Timeout o error de conexión
-    }
+    } catch (_) {}
     return [];
   }
 
   // ── POST /api/source/select ──────────────────────────────────────────
 
-  /// Selecciona una fuente de video.
-  ///
-  /// Ejemplos:
-  ///   ```dart
-  ///   // USB por índice
-  ///   sourceService.selectSource(SourceConfig.usb(index: 0));
-  ///
-  ///   // DroidCam con autodescubrimiento
-  ///   sourceService.selectSource(SourceConfig.droidcam());
-  ///
-  ///   // URL manual (RTSP, HTTP, etc.)
-  ///   sourceService.selectSource(SourceConfig.manual("rtsp://..."));
-  ///   ```
   Future<SourceSelectResult> selectSource(SourceConfig config) async {
     try {
-      final response = await http
-          .post(
-            _uri('/api/source/select'),
-            headers: _jsonHeaders,
-            body: jsonEncode(config.toJson()),
-          )
-          .timeout(const Duration(seconds: 10)); // más tiempo por DroidCam
-      if (response.statusCode == 200) {
-        final json = jsonDecode(response.body) as Map<String, dynamic>;
-        return SourceSelectResult.fromJson(json);
-      }
+      final response = await _client
+          .post('/api/source/select', body: jsonEncode(config.toJson()));
       final json = jsonDecode(response.body) as Map<String, dynamic>;
-      return SourceSelectResult(
-        ok: false,
-        error: json['error'] as String? ?? 'Error HTTP ${response.statusCode}',
-      );
+      return SourceSelectResult.fromJson(json);
     } catch (e) {
-      return SourceSelectResult(
-        ok: false,
-        error: 'Error de conexión: $e',
-      );
+      return SourceSelectResult(ok: false, error: 'Error de conexión: $e');
     }
   }
 
   // ── POST /api/source/scan-droidcam ───────────────────────────────────
 
-  /// Escanea la red local en busca de DroidCam.
   Future<DroidcamScanResult> scanDroidcam() async {
     try {
-      final response = await http
-          .post(_uri('/api/source/scan-droidcam'))
-          .timeout(const Duration(seconds: 30)); // escaneo de red lento
+      final response = await _client.post('/api/source/scan-droidcam');
       if (response.statusCode == 200) {
-        final json = jsonDecode(response.body) as Map<String, dynamic>;
-        return DroidcamScanResult.fromJson(json);
+        return DroidcamScanResult.fromJson(
+            jsonDecode(response.body) as Map<String, dynamic>);
       }
-    } catch (e) {
-      // Timeout o error de conexión
-    }
-    return const DroidcamScanResult(
-      message: 'No se pudo escanear la red',
-    );
+    } catch (_) {}
+    return const DroidcamScanResult(message: 'No se pudo escanear la red');
   }
 
   // ── Conveniencia: escanear y seleccionar DroidCam ────────────────────

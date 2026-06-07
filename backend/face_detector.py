@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import json
 import logging
+import pickle
 import threading
-import time
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -19,6 +20,8 @@ from config import AUTHORIZED_SIMILARITY, MATCH_MINIMUM_SIMILARITY
 from supabase_client import FaceMatchResult, SupabaseClient
 
 logger = logging.getLogger(__name__)
+
+_CACHE_PATH = Path(__file__).parent / "embeddings_cache.pkl"
 
 try:
     import insightface
@@ -41,6 +44,7 @@ class FaceDetector:
         self._supabase = supabase
         self._app: FaceAnalysis | None = None
         self._known_embeddings: list[dict[str, Any]] = []
+        self._emb_matrix: np.ndarray | None = None
         self._embeddings_lock = threading.Lock()
         self._ready = False
 
@@ -60,7 +64,7 @@ class FaceDetector:
         try:
             self._app = FaceAnalysis(
                 name="buffalo_s",
-                providers=["CPUExecutionProvider"],
+                providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
             )
             self._app.prepare(ctx_id=0, det_thresh=0.5)
             logger.info("InsightFace buffalo_s inicializado correctamente")
@@ -76,39 +80,71 @@ class FaceDetector:
             )
             self._ready = True
 
+    def _parse_records(self, records: list[dict]) -> list[dict]:
+        parsed = []
+        for r in records:
+            emb_str = r.get("embedding", "[]")
+            if isinstance(emb_str, str):
+                emb = np.array(json.loads(emb_str), dtype=np.float32)
+            else:
+                emb = np.array(emb_str, dtype=np.float32)
+            person_data = r.get("person", {})
+            full_name = person_data.get("full_name", "Desconocido") if isinstance(person_data, dict) else "Desconocido"
+            parsed.append({
+                "embedding_id": r["id"],
+                "person_id": r["person_id"],
+                "full_name": full_name,
+                "embedding": emb,
+            })
+        return parsed
+
     def _load_known_embeddings(self) -> None:
-        """Carga los embeddings desde Supabase y los parsea."""
+        """Carga embeddings desde Supabase (o caché en disco si Supabase falla)."""
         if not HAS_INSIGHTFACE or self._app is None:
             return
         try:
             records = self._supabase.fetch_face_embeddings()
+            parsed = self._parse_records(records)
             with self._embeddings_lock:
-                self._known_embeddings = []
-                for r in records:
-                    emb_str = r.get("embedding", "[]")
-                    if isinstance(emb_str, str):
-                        emb = np.array(json.loads(emb_str), dtype=np.float32)
-                    else:
-                        emb = np.array(emb_str, dtype=np.float32)
-                    person_data = r.get("person", {})
-                    if isinstance(person_data, dict):
-                        full_name = person_data.get("full_name", "Desconocido")
-                    else:
-                        full_name = "Desconocido"
-                    self._known_embeddings.append({
-                        "embedding_id": r["id"],
-                        "person_id": r["person_id"],
-                        "full_name": full_name,
-                        "embedding": emb,
-                    })
-            logger.info(
-                "Cargados %d embeddings conocidos", len(self._known_embeddings)
-            )
+                self._known_embeddings = parsed
+                self._build_matrix()
+            self._save_cache(parsed)
+            logger.info("Cargados %d embeddings desde Supabase", len(parsed))
         except Exception as exc:
-            logger.exception("Error cargando embeddings: %s", exc)
+            logger.exception("Error cargando embeddings de Supabase: %s", exc)
+            self._load_from_cache()
+
+    def _build_matrix(self) -> None:
+        """Pre-computa matriz normalizada para búsqueda vectorizada. Llamar con lock tomado."""
+        if not self._known_embeddings:
+            self._emb_matrix: np.ndarray | None = None
+            return
+        raw = np.stack([e["embedding"] for e in self._known_embeddings])  # (N, 512)
+        norms = np.linalg.norm(raw, axis=1, keepdims=True) + 1e-10
+        self._emb_matrix = raw / norms  # normalizada, float32
+
+    def _save_cache(self, parsed: list[dict]) -> None:
+        try:
+            with open(_CACHE_PATH, "wb") as f:
+                pickle.dump(parsed, f)
+        except Exception as exc:
+            logger.debug("No se pudo guardar caché: %s", exc)
+
+    def _load_from_cache(self) -> None:
+        if not _CACHE_PATH.exists():
+            return
+        try:
+            with open(_CACHE_PATH, "rb") as f:
+                parsed = pickle.load(f)
+            with self._embeddings_lock:
+                self._known_embeddings = parsed
+                self._build_matrix()
+            logger.info("Embeddings cargados desde caché local (%d)", len(parsed))
+        except Exception as exc:
+            logger.warning("Caché inválida: %s", exc)
 
     def refresh_embeddings(self) -> None:
-        """Recarga embeddings desde Supabase (útil después de agregar usuarios)."""
+        """Recarga embeddings desde Supabase e invalida caché."""
         self._load_known_embeddings()
 
     # ── Detección ──────────────────────────────────────────────────────
@@ -175,32 +211,25 @@ class FaceDetector:
 
     def recognize(self, embedding: np.ndarray) -> FaceMatchResult:
         """
-        Compara un embedding contra los conocidos.
-        Retorna el mejor match o 'Desconocido' si no hay match suficiente.
+        Compara un embedding contra todos los conocidos (vectorizado).
+        Un solo dot-product matricial en vez de loop.
         """
         if not HAS_INSIGHTFACE or self._app is None:
             return FaceMatchResult()
 
         with self._embeddings_lock:
-            if not self._known_embeddings:
+            if not self._known_embeddings or self._emb_matrix is None:
                 return FaceMatchResult()
 
-            best_sim = -1.0
-            best_match = None
+            # Normalizar query
+            norm_e = embedding / (np.linalg.norm(embedding) + 1e-10)  # (512,)
+            # Similitudes coseno de todos en una operación
+            sims = self._emb_matrix @ norm_e  # (N,)
+            best_idx = int(np.argmax(sims))
+            best_sim = float(sims[best_idx])
 
-            for known in self._known_embeddings:
-                known_emb = known["embedding"]
-                # Normalizar y calcular similitud coseno
-                norm_e = embedding / (np.linalg.norm(embedding) + 1e-10)
-                norm_k = known_emb / (np.linalg.norm(known_emb) + 1e-10)
-                sim = float(np.dot(norm_e, norm_k))
-
-                if sim > best_sim:
-                    best_sim = sim
-                    best_match = known
-
-            if best_match and best_sim > MATCH_MINIMUM_SIMILARITY:
-                # Mapear similitud a confianza 0-1
+            if best_sim > MATCH_MINIMUM_SIMILARITY:
+                best_match = self._known_embeddings[best_idx]
                 confidence = max(
                     0.0,
                     (best_sim - MATCH_MINIMUM_SIMILARITY)

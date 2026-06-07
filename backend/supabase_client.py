@@ -27,6 +27,23 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Excepciones
+# ---------------------------------------------------------------------------
+
+class SupabaseError(Exception):
+    """Error base de operaciones con Supabase."""
+
+class SupabaseUploadError(SupabaseError):
+    """Fallo al subir un archivo a Storage."""
+
+class EmbeddingFetchError(SupabaseError):
+    """Fallo al obtener embeddings de la BD."""
+
+class AttendanceError(SupabaseError):
+    """Fallo en operaciones de attendance."""
+
+
+# ---------------------------------------------------------------------------
 # DTOs
 # ---------------------------------------------------------------------------
 
@@ -145,8 +162,7 @@ class SupabaseClient:
             )
             logger.info("Snapshot subida: %s", public_url)
             return public_url
-        logger.warning("Error subiendo snapshot: %s", resp.text)
-        return None
+        raise SupabaseUploadError(f"HTTP {resp.status_code}: {resp.text}")
 
     # ── Face Embeddings ──────────────────────────────────────────────────
 
@@ -164,8 +180,7 @@ class SupabaseClient:
         }
         resp = requests.get(url, headers=self._headers, params=params, timeout=10)
         if not resp.ok:
-            logger.warning("Error fetching embeddings: %s", resp.text)
-            return []
+            raise EmbeddingFetchError(f"HTTP {resp.status_code}: {resp.text}")
 
         records = resp.json()
         if not records:
@@ -307,6 +322,219 @@ class SupabaseClient:
             return True
         logger.warning("Error cerrando attendance: %s", resp.text)
         return False
+
+    # ── Remote Logging ──────────────────────────────────────────────────
+
+    def push_log(self, level: str, message: str, extra: dict | None = None) -> None:
+        """Envía una línea de log a la tabla backend_logs en Supabase."""
+        payload = {
+            "id": str(uuid.uuid4()),
+            "company_id": COMPANY_ID,
+            "level": level,
+            "message": message[:2000],
+            "extra": extra or {},
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S.000000+00:00", time.gmtime()),
+        }
+        url = f"{self._base_url}/rest/v1/backend_logs"
+        try:
+            requests.post(
+                url,
+                headers={**self._headers, "Prefer": "return=minimal"},
+                json=payload,
+                timeout=5,
+            )
+        except Exception:
+            pass  # logging no debe romper el flujo principal
+
+    # ── Multi-tenant RPC ────────────────────────────────────────────────
+
+    def set_company_context(self) -> None:
+        """
+        Llama set_company_context(COMPANY_ID) en Supabase vía RPC.
+        Útil antes de operaciones en batch que invocan funciones/triggers
+        con SECURITY DEFINER que leen app.company_id.
+        Service_role ya bypassa RLS, pero los triggers pueden necesitar el contexto.
+        """
+        url = f"{self._base_url}/rest/v1/rpc/set_company_context"
+        try:
+            requests.post(
+                url,
+                headers=self._headers,
+                json={"p_company_id": COMPANY_ID},
+                timeout=5,
+            )
+        except Exception as exc:
+            logger.debug("set_company_context falló (no crítico): %s", exc)
+
+    # ── Admin queries ────────────────────────────────────────────────────
+
+    def fetch_recent_access_records(self, limit: int = 50) -> list[dict]:
+        """Devuelve los access_records más recientes de la empresa."""
+        url = f"{self._base_url}/rest/v1/access_records"
+        params = {
+            "select": "id,person_id,occurred_at,result,confidence,similarity,source_name,snapshot_url",
+            "company_id": f"eq.{COMPANY_ID}",
+            "order": "occurred_at.desc",
+            "limit": str(limit),
+        }
+        resp = requests.get(url, headers=self._headers, params=params, timeout=10)
+        if resp.ok:
+            return resp.json()
+        logger.warning("fetch_recent_access_records error: %s", resp.text)
+        return []
+
+    def fetch_today_attendances(self) -> list[dict]:
+        """Devuelve las asistencias de hoy con datos de la persona."""
+        today = time.strftime("%Y-%m-%d")
+        url = f"{self._base_url}/rest/v1/attendances"
+        params = {
+            "select": "id,person_id,attendance_date,status,created_at,updated_at",
+            "company_id": f"eq.{COMPANY_ID}",
+            "attendance_date": f"eq.{today}",
+            "order": "created_at.desc",
+        }
+        resp = requests.get(url, headers=self._headers, params=params, timeout=10)
+        if resp.ok:
+            rows = resp.json()
+            # Enriquecer con nombre de persona
+            pid_set = {r["person_id"] for r in rows if r.get("person_id")}
+            if pid_set:
+                persons_url = f"{self._base_url}/rest/v1/registered_persons"
+                p_resp = requests.get(
+                    persons_url,
+                    headers=self._headers,
+                    params={"select": "id,full_name", "id": f"in.({','.join(pid_set)})"},
+                    timeout=10,
+                )
+                if p_resp.ok:
+                    pmap = {p["id"]: p["full_name"] for p in p_resp.json()}
+                    for r in rows:
+                        r["full_name"] = pmap.get(r.get("person_id", ""), "Desconocido")
+            return rows
+        logger.warning("fetch_today_attendances error: %s", resp.text)
+        return []
+
+    # ── Device management ────────────────────────────────────────────────────
+
+    def upsert_device(
+        self,
+        device_uid: str,
+        company_id: str,
+        name: str,
+        app_version: str | None = None,
+    ) -> bool:
+        """Registra o actualiza la terminal en Supabase vía RPC."""
+        url = f"{self._base_url}/rest/v1/rpc/upsert_device"
+        payload = {
+            "p_device_uid": device_uid,
+            "p_company_id": company_id,
+            "p_name": name,
+            "p_app_version": app_version,
+        }
+        try:
+            resp = requests.post(url, headers=self._headers, json=payload, timeout=10)
+            return resp.ok
+        except Exception as exc:
+            logger.warning("upsert_device error: %s", exc)
+            return False
+
+    def heartbeat_device(
+        self,
+        device_uid: str,
+        detections_today: int = 0,
+        app_version: str | None = None,
+    ) -> bool:
+        """Actualiza is_online=true + last_seen_at + detections_today."""
+        url = f"{self._base_url}/rest/v1/rpc/heartbeat_device"
+        try:
+            resp = requests.post(
+                url,
+                headers=self._headers,
+                json={
+                    "p_device_uid": device_uid,
+                    "p_detections_today": detections_today,
+                    "p_app_version": app_version,
+                },
+                timeout=8,
+            )
+            return resp.ok
+        except Exception as exc:
+            logger.debug("heartbeat_device error: %s", exc)
+            return False
+
+    def device_offline(self, device_uid: str) -> None:
+        """Marca el dispositivo como offline al apagar."""
+        url = f"{self._base_url}/rest/v1/devices"
+        try:
+            requests.patch(
+                url,
+                headers=self._headers,
+                params={"device_uid": f"eq.{device_uid}"},
+                json={"is_online": False},
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+    def get_device_config(self, device_uid: str, company_id: str) -> dict | None:
+        """Obtiene camera_configs + system_settings vía RPC."""
+        url = f"{self._base_url}/rest/v1/rpc/get_device_config"
+        try:
+            resp = requests.post(
+                url,
+                headers=self._headers,
+                json={"p_device_uid": device_uid, "p_company_id": company_id},
+                timeout=8,
+            )
+            if resp.ok:
+                return resp.json()
+        except Exception as exc:
+            logger.debug("get_device_config error: %s", exc)
+        return None
+
+    def insert_access_record_raw(self, record_dict: dict) -> bool:
+        """Inserta un access_record desde un dict (para la cola offline)."""
+        url = f"{self._base_url}/rest/v1/access_records"
+        try:
+            resp = requests.post(
+                url,
+                headers={**self._headers, "Prefer": "return=minimal"},
+                json=record_dict,
+                timeout=10,
+            )
+            return resp.ok
+        except Exception as exc:
+            logger.warning("insert_access_record_raw error: %s", exc)
+            return False
+
+    def check_connection(self) -> bool:
+        """Comprueba si Supabase responde (health check rápido)."""
+        try:
+            resp = requests.get(
+                f"{self._base_url}/rest/v1/",
+                headers=self._headers,
+                timeout=4,
+            )
+            return resp.ok
+        except Exception:
+            return False
+
+    # ── Remote logging ────────────────────────────────────────────────────────
+
+    def fetch_recent_logs(self, limit: int = 100) -> list[dict]:
+        """Devuelve los últimos logs remotos de la empresa."""
+        url = f"{self._base_url}/rest/v1/backend_logs"
+        params = {
+            "select": "id,level,message,extra,created_at",
+            "company_id": f"eq.{COMPANY_ID}",
+            "order": "created_at.desc",
+            "limit": str(limit),
+        }
+        resp = requests.get(url, headers=self._headers, params=params, timeout=10)
+        if resp.ok:
+            return resp.json()
+        logger.warning("fetch_recent_logs error: %s", resp.text)
+        return []
 
     # ── Attendance Marks ────────────────────────────────────────────────
 

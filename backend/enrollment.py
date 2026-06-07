@@ -542,7 +542,22 @@ def main():
     # 8. Subir a Supabase
     uploaded = upload_samples(supabase, person, samples)
 
-    # 9. Resumen
+    # 9. Notificar al backend para recargar embeddings sin reiniciar
+    if uploaded > 0:
+        try:
+            from config import FLASK_PORT
+            resp = requests.post(
+                f"http://127.0.0.1:{FLASK_PORT}/api/refresh-embeddings",
+                timeout=3,
+            )
+            if resp.ok:
+                print("  [OK] Backend recargó embeddings automáticamente.")
+            else:
+                print("  [!] Backend no pudo recargar (reinicia manualmente).")
+        except Exception:
+            print("  [!] Backend no está corriendo — reinícialo para activar los cambios.")
+
+    # 10. Resumen
     print()
     print("=" * 55)
     print(f"  Enrollment de '{person['full_name']}' finalizado.")

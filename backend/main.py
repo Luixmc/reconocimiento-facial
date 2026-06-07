@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import queue
+import secrets
 import sys
 import threading
 import time
@@ -23,13 +24,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 import shutil
-from flask import Flask, Response, jsonify, request
+from flask import Flask
 
 BASE_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(BASE_DIR))
 
 from source_manager import SourceManager, SourceConfig
 from config import (
+    APP_VERSION,
     COMPANY_ID,
     DEFAULT_CAMERA_INDEX,
     DETECTION_FRAME_SKIP,
@@ -38,14 +40,26 @@ from config import (
     MIN_CONFIDENCE_TO_CAPTURE,
     FLASK_HOST,
     FLASK_PORT,
+    SNAPSHOT_QUALITY,
 )
+from device_manager import DeviceManager, get_or_create_device_uid
+from offline_queue import OfflineQueue
+
+# Identificador único de instancia — permite correr múltiples backends en
+# puertos distintos sin que sus archivos de runtime se pisen entre sí.
+_INSTANCE_ID = os.environ.get("INSTANCE_ID", str(FLASK_PORT))
+from api_routes import register_routes
+from attendance_service import handle_attendance
+from enroll_service import EnrollService
 from face_detector import FaceDetector
+from remote_logger import attach_remote_logging
+from startup_checks import run_startup_checks
 from supabase_client import AccessRecord, SupabaseClient
 
 # ── Logging con rotación ──────────────────────────────────────────────────
 from logging.handlers import RotatingFileHandler
 
-log_file = Path(BASE_DIR / "backend.log")
+log_file = Path(BASE_DIR / f"backend_{_INSTANCE_ID}.log")
 # Rotar cada 5MB, mantener 3 backups
 handler_file = RotatingFileHandler(
     log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
@@ -68,19 +82,30 @@ _state = {
     "status": "starting",
     "camera_index": DEFAULT_CAMERA_INDEX,
     "camera_name": f"Camara {DEFAULT_CAMERA_INDEX}",
-    "source_type": "usb",  # "usb" | "droidcam"
-    "source_url": None,     # URL si es DroidCam
+    "source_type": "usb",
+    "source_url": None,
     "last_detection": None,
     "last_snapshot_url": None,
     "last_person_name": None,
     "fps": 0,
     "total_detections": 0,
+    # SaaS extras (device_uid se actualiza en main() tras inicializar _DEVICE_UID)
+    "supabase_online": False,
+    "device_uid": "",
+    "offline_pending": 0,
+    "app_version": APP_VERSION,
 }
 _state_lock = threading.Lock()
 
 _source = SourceManager()
 _supabase = SupabaseClient()
 _detector = FaceDetector(_supabase)
+
+# ── Módulos SaaS ─────────────────────────────────────────────────────────
+# IMPORTANTE: inicializar _DEVICE_UID antes de _state para poder referenciarlo
+_DEVICE_UID = get_or_create_device_uid()
+_device_mgr = DeviceManager(_supabase, _DEVICE_UID, COMPANY_ID, APP_VERSION)
+_offline_q = OfflineQueue()
 
 _capture_running = threading.Event()
 _shutdown = threading.Event()  # Señal de shutdown para el watchdog
@@ -95,253 +120,74 @@ _last_face_present_time: float = 0.0    # cuándo se vio un rostro por última v
 _frame_buffer: queue.Queue = queue.Queue(maxsize=2)
 _last_frame_time: float = 0.0
 
+# ── Caché JPEG para /api/snapshot ────────────────────────────────────────
+# El hilo lector encoda una vez; los N requests HTTP por segundo lo leen sin encode.
+# Dict mutable: api_routes y _camera_reader comparten la misma referencia.
+_jpeg_shared: dict = {"frame": None}   # key "frame" → bytes | None
+_jpeg_lock = threading.Lock()
+
 
 app = Flask(__name__)
-
-# Silenciar logs HTTP de werkzeug (cada /api/snapshot genera un log por request)
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
-# --------------------------------------------------------------------------
-# API REST
-# --------------------------------------------------------------------------
+# ── Token de autenticación local ──────────────────────────────────────────
+_TOKEN_FILE = BASE_DIR / f"backend_{_INSTANCE_ID}.token"
+_BACKEND_TOKEN = secrets.token_hex(32)
+_PUBLIC_ENDPOINTS = {"/api/health", "/api/snapshot", "/api/shutdown"}
 
-@app.route("/api/status")
-def api_status():
-    with _state_lock:
-        return jsonify({**json.loads(json.dumps(_state, default=str))})
-
-
-@app.route("/api/cameras")
-def api_cameras():
-    """Lista todas las fuentes disponibles (USB + DroidCam)."""
-    return jsonify(_source.list_sources())
-
-
-@app.route("/api/camera/test")
-def api_camera_test():
-    """Captura un frame de prueba y reporta si la fuente funciona."""
-    s = _source.status()
-    result = {
-        "ok": False,
-        "active": s["active"],
-        "source_type": s["source_type"],
-        "source_id": s["source_id"],
-        "frame": False,
-        "jpeg": False,
-        "dimensions": None,
-        "error": s.get("error"),
-    }
-
-    if not s["active"]:
-        result["error"] = result["error"] or "Fuente no activa"
-        return jsonify(result), 503
-
-    ok, frame = _source.get_frame()
-    if not ok or frame is None:
-        result["error"] = "No se pudo leer frame"
-        return jsonify(result), 503
-
-    result["frame"] = True
-    h, w = frame.shape[:2]
-    result["dimensions"] = f"{w}x{h}"
-
-    jpeg = _source.capture_jpeg()
-    if jpeg is not None:
-        result["jpeg"] = True
-        result["jpeg_size"] = len(jpeg)
-
-    result["ok"] = True
-    return jsonify(result)
-
-
-@app.route("/api/camera/select", methods=["POST"])
-def api_camera_select():
-    """Cambia la cámara activa (backward compat).
-    
-    Formatos aceptados (antiguo):
-      {"index": 0}
-      {"index": -1, "source": "droidcam"}
-      {"source": "droidcam", "url": "..."}
-    
-    Internamente delega en /api/source/select.
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    index = data.get("index")
-    src = data.get("source", "usb")
-    url = data.get("url")
-
-    # Convertir formato antiguo a SourceConfig
-    if src == "droidcam" or index == -1:
-        config = SourceConfig(
-            source_type="droidcam",
-            manual_url=url,
-            auto_discover=True,
-        )
-    else:
-        config = SourceConfig(
-            source_type="usb",
-            usb_index=int(index) if index is not None else DEFAULT_CAMERA_INDEX,
-            auto_discover=False,
-        )
-
-    reset_rate_limit()
-    success = _source.update_config(config)
-
-    if success:
-        s = _source.status()
-        _sync_state_from_source(s)
-        return jsonify({
-            "ok": True,
-            "source_type": s["source_type"],
-            "source_id": s["source_id"],
-            "source_url": s["source_url"],
-        })
-
-    # Restaurar fuente anterior con auto-discover
-    logger.warning("No se pudo abrir fuente solicitada. Buscando otra...")
-    if not _try_open_camera():
-        return jsonify({"ok": False, "error": "No se pudo abrir ninguna fuente"}), 400
-
-    s = _source.status()
-    _sync_state_from_source(s)
-    return jsonify({"ok": False, "error": "No se pudo abrir la fuente solicitada"}), 400
-
-
-@app.route("/api/snapshot")
-def api_snapshot():
-    frame = _source.get_latest_frame()
-    if frame is None:
-        return Response("No frame", status=503)
-    ret, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    if not ret:
-        return Response("Encode error", status=500)
-    return Response(buf.tobytes(), mimetype="image/jpeg")
-
-
-@app.route("/api/refresh-embeddings", methods=["POST"])
-def api_refresh_embeddings():
-    _detector.refresh_embeddings()
-    return jsonify({"ok": True})
-
-
-@app.route("/api/health")
-def api_health():
-    return jsonify({"ok": True, "service": "face-recognition-backend"})
-
-
-@app.route("/api/shutdown", methods=["POST"])
-def api_shutdown():
-    """
-    Apaga el backend de forma controlada.
-    
-    Flujo:
-      1. Responde 200 OK inmediatamente (el cliente recibe confirmación)
-      2. Espera 300ms en hilo separado (tiempo para que la respuesta viaje)
-      3. Setea _shutdown → el watchdog sale → finally corre limpiamente
-         (libera cámara, borra PID file, cierra conexiones)
-    """
-    logger.info("Shutdown solicitado vía API — respondiendo antes de apagar")
-
-    def _delayed_shutdown():
-        time.sleep(0.3)  # 300ms: suficiente para que el 200 OK llegue al cliente
-        logger.info("Ejecutando shutdown ordenado...")
-        _shutdown.set()
-        # Dar 2 segundos al watchdog para que salga limpiamente
-        # antes de forzar la salida del proceso
-        time.sleep(2.0)
-        logger.info("Proceso terminando.")
-        os._exit(0)  # Salida limpia que no levanta excepciones en hilos daemon
-
-    t = threading.Thread(target=_delayed_shutdown, daemon=True)
-    t.start()
-
-    return jsonify({"ok": True, "message": "Apagando backend..."})
+# Las rutas se registran en main() una vez que los globals están listos
 
 
 # --------------------------------------------------------------------------
-# API /api/source/* — Fuentes de video (unificadas)
+# Limpieza de caché y archivos temporales
 # --------------------------------------------------------------------------
 
-@app.route("/api/source/status")
-def api_source_status():
-    """Estado actual de la fuente de video."""
-    return jsonify(_source.status())
-
-
-@app.route("/api/source/list")
-def api_source_list():
-    """Lista todas las fuentes disponibles."""
-    return jsonify(_source.list_sources())
-
-
-@app.route("/api/source/select", methods=["POST"])
-def api_source_select():
-    """Selecciona una fuente de video.
-
-    Body:
-      {"source_type": "usb", "usb_index": 0}
-      {"source_type": "droidcam", "manual_url": "http://...:4747/video"}
-      {"source_type": "droidcam", "auto_discover": true}
-      {"manual_url": "rtsp://192.168.1.50/stream1"}
-      {"source_type": "manual", "manual_url": "http://..."}
-
-    Retorna:
-      {"ok": true, "source_type": "...", "source_id": "...", "source_url": "..."}
+def cleanup_cache() -> float:
     """
-    data = request.get_json(force=True, silent=True) or {}
-    config = SourceConfig(
-        source_type=data.get("source_type", "usb"),
-        manual_url=data.get("manual_url"),
-        usb_index=data.get("usb_index", 0),
-        auto_discover=data.get("auto_discover", True),
-    )
+    Limpia archivos temporales del directorio backend.
+    Devuelve el espacio liberado en MB.
+    """
+    freed_bytes = 0
 
-    reset_rate_limit()
-    success = _source.update_config(config)
+    # __pycache__ (bytecode Python — se regenera solo)
+    pycache = BASE_DIR / "__pycache__"
+    if pycache.exists():
+        try:
+            for f in pycache.iterdir():
+                freed_bytes += f.stat().st_size
+            shutil.rmtree(pycache, ignore_errors=True)
+        except Exception:
+            pass
 
-    if success:
-        s = _source.status()
-        _sync_state_from_source(s)
-        return jsonify({
-            "ok": True,
-            "source_type": s["source_type"],
-            "source_id": s["source_id"],
-            "source_url": s["source_url"],
-        })
+    # Archivos de log de backup (rotados): backend_*.log.1, .2, .3
+    for f in BASE_DIR.glob(f"backend_{_INSTANCE_ID}.log.*"):
+        try:
+            freed_bytes += f.stat().st_size
+            f.unlink(missing_ok=True)
+        except Exception:
+            pass
 
-    # Fallback: intentar con auto-discover
-    logger.warning("Fuente %s no disponible. Buscando otra...", config.source_type)
-    if _try_open_camera():
-        s = _source.status()
-        _sync_state_from_source(s)
-        return jsonify({
-            "ok": False,
-            "error": f"Fuente {config.source_type} no disponible",
-            "fallback": True,
-            "fallback_source_type": s["source_type"],
-            "fallback_source_id": s["source_id"],
-        }), 200
+    # Archivos .tmp en el directorio backend
+    for f in BASE_DIR.glob("*.tmp"):
+        try:
+            freed_bytes += f.stat().st_size
+            f.unlink(missing_ok=True)
+        except Exception:
+            pass
 
-    return jsonify({"ok": False, "error": "No se pudo abrir ninguna fuente"}), 400
-
-
-@app.route("/api/source/scan-droidcam", methods=["POST"])
-def api_source_scan_droidcam():
-    """Escanea la red local en busca de DroidCam."""
-    logger.info("Escaneando red en busca de DroidCam...")
-    url = _source.scan_droidcam()
-    if url:
-        ip = url.split("/")[2].split(":")[0] if "/" in url else "?"
-        logger.info("DroidCam encontrado: %s", url)
-        return jsonify({"ok": True, "url": url, "ip": ip})
-    return jsonify({"ok": False, "url": None,
-                     "message": "No se encontró DroidCam en la red local"})
+    freed_mb = freed_bytes / (1024 * 1024)
+    logger.info("Caché limpiada — %.2f MB liberados", freed_mb)
+    return freed_mb
 
 
-# (Legacy) Escanea red en busca de DroidCam
-@app.route("/api/camera/scan-droidcam", methods=["POST"])
-def api_camera_scan_droidcam():
-    return api_source_scan_droidcam()
+def _periodic_cleanup_loop():
+    """Limpia caché cada 6 horas mientras el backend está activo."""
+    # Primera ejecución al arrancar (limpia restos de sesión anterior)
+    cleanup_cache()
+    while not _shutdown.is_set():
+        _shutdown.wait(timeout=6 * 3600)  # cada 6 horas
+        if not _shutdown.is_set():
+            cleanup_cache()
 
 
 # --------------------------------------------------------------------------
@@ -400,36 +246,6 @@ def reset_rate_limit():
     _last_person_id = None
     _last_person_time = 0.0
     _last_face_present_time = 0.0
-
-
-# --------------------------------------------------------------------------
-# Lógica de attendance (entrada/salida)
-# --------------------------------------------------------------------------
-
-def handle_attendance(match, access_record_id: str, person_id: str | None):
-    """
-    Gestiona la apertura/cierre de attendances.
-    - Si la persona NO tiene attendance abierta hoy → crea una (ENTRADA)
-    - Si ya tiene una abierta → la cierra (SALIDA)
-    """
-    if not person_id:
-        return
-
-    existing = _supabase.get_today_attendance(person_id)
-
-    if existing:
-        # Ya tiene attendance abierta → marcar como SALIDA
-        att_id = existing["id"]
-        ok = _supabase.close_attendance(att_id)
-        if ok:
-            _supabase.insert_attendance_mark(att_id, access_record_id, "exit")
-            logger.info("SALIDA registrada para persona %s", person_id)
-    else:
-        # No tiene → crear ENTRADA
-        att = _supabase.create_attendance(person_id)
-        if att:
-            _supabase.insert_attendance_mark(att["id"], access_record_id, "entry")
-            logger.info("ENTRADA registrada para persona %s", person_id)
 
 
 # --------------------------------------------------------------------------
@@ -528,6 +344,11 @@ def _camera_reader():
         ok, frame = _source.get_frame()
         if ok and frame is not None:
             _last_frame_time = time.time()
+            # Encode JPEG una sola vez aquí; /api/snapshot lo lee sin encode
+            ret, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, SNAPSHOT_QUALITY])
+            if ret:
+                with _jpeg_lock:
+                    _jpeg_shared["frame"] = buf.tobytes()
             # Actualizar buffer: descartar frame viejo si está lleno
             try:
                 _frame_buffer.put_nowait(frame)
@@ -554,13 +375,21 @@ def _process_detection_async(record: AccessRecord, snap_bytes: bytes | None,
             # Subir snapshot a Storage
             snap_url = None
             if snap_bytes:
-                snap_url = _supabase.upload_snapshot(snap_bytes)
+                try:
+                    snap_url = _supabase.upload_snapshot(snap_bytes)
+                except Exception as upload_exc:
+                    logger.warning("Snapshot no subida (continuando): %s", upload_exc)
 
-            # Insertar access record
-            _supabase.insert_access_record(record)
+            # Insertar access record (con fallback offline)
+            ok = _supabase.insert_access_record(record)
+            if not ok:
+                _offline_q.enqueue("access_record", record.to_dict())
+                with _state_lock:
+                    _state["offline_pending"] = _offline_q.pending_count()
+            _device_mgr.increment_detections()
 
             # Manejar attendance (entrada/salida)
-            handle_attendance(match, record.id, person_id)
+            handle_attendance(_supabase, record.id, person_id)
 
             # Actualizar estado global con la URL del snapshot
             with _state_lock:
@@ -810,14 +639,21 @@ def _cleanup_files():
 
     # PID file
     try:
-        (base / "backend.pid").unlink(missing_ok=True)
+        (base / f"backend_{_INSTANCE_ID}.pid").unlink(missing_ok=True)
         logger.debug("PID file eliminado")
+    except Exception:
+        pass
+
+    # Token file
+    try:
+        (base / f"backend_{_INSTANCE_ID}.token").unlink(missing_ok=True)
+        logger.debug("Token file eliminado")
     except Exception:
         pass
 
     # Log file
     try:
-        (base / "backend.log").unlink(missing_ok=True)
+        (base / f"backend_{_INSTANCE_ID}.log").unlink(missing_ok=True)
         logger.debug("Log file eliminado")
     except Exception:
         pass
@@ -854,15 +690,82 @@ def main():
     logger.info("BioFace - Sistema de Reconocimiento Facial (Headless)")
     logger.info("=" * 50)
 
+    # Actualizar device_uid en estado global (ya fue calculado al inicio del módulo)
+    with _state_lock:
+        _state["device_uid"] = _DEVICE_UID
+
+    # Logging remoto a Supabase (WARNING+ en background)
+    attach_remote_logging(_supabase)
+
+    # Verificaciones de arranque: licencia + OTA
+    run_startup_checks()
+
+    # Registrar dispositivo en Supabase + iniciar heartbeat
+    _device_mgr.register()
+    _device_mgr.start_heartbeat()
+
+    # Cola offline: hilo de sincronización cada 10 min
+    _offline_q.start_sync_daemon(_supabase)
+
+    # Hilo de limpieza periódica de caché (cada 6 horas)
+    threading.Thread(target=_periodic_cleanup_loop, daemon=True,
+                     name="cache-cleanup").start()
+
+    # Hilo de check de conexión a Supabase (actualiza _state["supabase_online"])
+    def _connectivity_loop():
+        while not _shutdown.is_set():
+            online = _supabase.check_connection()
+            with _state_lock:
+                _state["supabase_online"] = online
+                _state["offline_pending"] = _offline_q.pending_count()
+            # Si volvió la conexión, intentar sync inmediato
+            if online and _offline_q.pending_count() > 0:
+                _offline_q.try_sync_now()
+            _shutdown.wait(timeout=30)
+
+    threading.Thread(target=_connectivity_loop, daemon=True,
+                     name="connectivity-check").start()
+
     # Liberar puerto si está ocupado (por un cierre previo abrupto)
     _free_port(FLASK_PORT)
 
     # Escribir PID file para que Flutter pueda matarnos si es necesario
-    pid_file = Path(BASE_DIR / "backend.pid")
+    pid_file = Path(BASE_DIR / f"backend_{_INSTANCE_ID}.pid")
     try:
         pid_file.write_text(str(os.getpid()))
     except Exception as exc:
         logger.debug("No se pudo escribir PID file: %s", exc)
+
+    # Escribir token para que Flutter pueda autenticar sus llamadas
+    try:
+        _TOKEN_FILE.write_text(_BACKEND_TOKEN)
+        logger.info("Token de autenticación escrito en backend.token")
+    except Exception as exc:
+        logger.warning("No se pudo escribir token file: %s", exc)
+
+    # Servicio de enrollment HTTP (reutiliza el modelo del FaceDetector)
+    _enroll_svc = EnrollService(_supabase, face_app=getattr(_detector, "_app", None))
+
+    # Registrar rutas (necesita globals ya inicializados)
+    register_routes(app, {
+        "state": _state,
+        "state_lock": _state_lock,
+        "source": _source,
+        "detector": _detector,
+        "shutdown": _shutdown,
+        "jpeg_lock": _jpeg_lock,
+        "jpeg_shared": _jpeg_shared,       # dict mutable compartido {"frame": bytes|None}
+        "reset_rate_limit": reset_rate_limit,
+        "sync_state": _sync_state_from_source,
+        "try_open_camera": _try_open_camera,
+        "backend_token": _BACKEND_TOKEN,
+        "public_endpoints": _PUBLIC_ENDPOINTS,
+        "base_dir": BASE_DIR,
+        "enroll_service": _enroll_svc,
+        "supabase": _supabase,
+        "offline_queue": _offline_q,
+        "cleanup_cache_fn": cleanup_cache,
+    })
 
     flask_thread = threading.Thread(
         target=lambda: app.run(
@@ -884,6 +787,8 @@ def main():
         _shutdown.set()
         _capture_running.clear()
         _source.close()
+        _device_mgr.stop()
+        _offline_q.stop()
         _cleanup_files()
         logger.info("Sistema detenido — todo limpio")
 

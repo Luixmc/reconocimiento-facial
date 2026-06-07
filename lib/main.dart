@@ -1,690 +1,45 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show pow;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:window_manager/window_manager.dart';
 
+import 'screens/company_login.dart';
+import 'screens/kiosk_pin_screen.dart';
+import 'screens/multi_camera_screen.dart';
+import 'services/auth_service.dart';
+import 'services/backend_client.dart';
+import 'services/backend_manager.dart';
+import 'services/device_service.dart';
 import 'services/source_service.dart';
 import 'widgets/source_selector.dart';
-
-// ────────────────────────────────────────────────────────────────────────────
-// Configuración
-// ────────────────────────────────────────────────────────────────────────────
 
 const _backendHost = '127.0.0.1';
 const _backendPort = 5050;
 
-// Versión mínima de Python requerida
-const _minPythonVersion = (3, 8);
+// ─── Entry point ─────────────────────────────────────────────────────────────
 
-// ────────────────────────────────────────────────────────────────────────────
-// PythonFinder: detecta Python en cualquier máquina Windows
-// ────────────────────────────────────────────────────────────────────────────
-
-class PythonFinder {
-  /// Busca Python siguiendo esta prioridad:
-  /// 1. backend.exe empaquetado (PyInstaller)
-  /// 2. PATH del sistema (`where python`)
-  /// 3. Registro de Windows (HKLM + HKCU)
-  /// 4. Rutas comunes de instalación
-  static Future<String?> findPython() async {
-    // 1. Buscar backend empaquetado
-    final bundled = _findBundledBackend();
-    if (bundled != null) {
-      debugPrint('[PythonFinder] Usando backend empaquetado: $bundled');
-      return bundled;
-    }
-
-    // 2. Buscar en PATH (prueba varios candidatos)
-    final fromPath = await _findPythonInPath();
-    if (fromPath != null) {
-      debugPrint('[PythonFinder] Python en PATH: $fromPath');
-      return fromPath;
-    }
-
-    // 3. Buscar en el Registro de Windows
-    final fromRegistry = _findPythonInRegistry();
-    if (fromRegistry != null) {
-      debugPrint('[PythonFinder] Python en registro: $fromRegistry');
-      return fromRegistry;
-    }
-
-    // 4. Buscar en rutas comunes
-    final fromCommon = _findPythonInCommonLocations();
-    if (fromCommon != null) {
-      debugPrint('[PythonFinder] Python en ruta común: $fromCommon');
-      return fromCommon;
-    }
-
-    return null;
-  }
-
-  /// Busca el backend empaquetado con PyInstaller
-  static String? _findBundledBackend() {
-    final exeDir = _getExeDir();
-    final candidates = [
-      '$exeDir${Platform.pathSeparator}backend.exe',
-      '$exeDir${Platform.pathSeparator}backend'
-          '${Platform.pathSeparator}dist${Platform.pathSeparator}backend.exe',
-    ];
-
-    // Buscar hacia arriba por si el exe está en subdirectorios
-    var dir = Directory(exeDir);
-    for (var i = 0; i < 3; i++) {
-      candidates.add('${dir.path}${Platform.pathSeparator}backend.exe');
-      candidates.add(
-          '${dir.path}${Platform.pathSeparator}backend'
-          '${Platform.pathSeparator}dist${Platform.pathSeparator}backend.exe');
-      dir = dir.parent;
-    }
-
-    for (final path in candidates) {
-      if (File(path).existsSync()) return path;
-    }
-    return null;
-  }
-
-  /// Busca python.exe en el PATH probando múltiples comandos
-  static Future<String?> _findPythonInPath() async {
-    final commands = ['python', 'python3', 'py -3'];
-
-    for (final cmd in commands) {
-      try {
-        final result = await Process.run(
-          cmd.contains(' ') ? cmd.split(' ').first : cmd,
-          cmd.contains(' ') ? ['-3', '--version'] : ['--version'],
-          runInShell: true,
-        );
-        if (result.exitCode == 0) {
-          final version = (result.stdout as String).trim();
-          if (_isValidVersion(version)) {
-            // Obtener la ruta completa
-            final whereResult = await Process.run(
-              'where',
-              [cmd.split(' ').first],
-              runInShell: true,
-            );
-            if (whereResult.exitCode == 0) {
-              final lines = (whereResult.stdout as String)
-                  .trim()
-                  .split('\n')
-                  .where((l) => l.trim().isNotEmpty)
-                  .toList();
-              // Probar cada candidato hasta encontrar uno que funcione
-              for (final line in lines) {
-                final pythonPath = line.trim();
-                // Ignorar el stub de Microsoft Store (WindowsApps)
-                if (pythonPath.contains('WindowsApps')) continue;
-                final test = await Process.run(
-                  pythonPath,
-                  ['--version'],
-                  runInShell: true,
-                );
-                if (test.exitCode == 0 &&
-                    _isValidVersion((test.stdout as String).trim())) {
-                  return pythonPath;
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-    return null;
-  }
-
-  static bool _isValidVersion(String versionOutput) {
-    // Parsear "Python 3.12.5" -> (3, 12)
-    try {
-      final match = RegExp(r'Python\s+(\d+)\.(\d+)').firstMatch(versionOutput);
-      if (match != null) {
-        final major = int.parse(match.group(1)!);
-        final minor = int.parse(match.group(2)!);
-        if (major > _minPythonVersion.$1 ||
-            (major == _minPythonVersion.$1 &&
-                minor >= _minPythonVersion.$2)) {
-          return true;
-        }
-      }
-    } catch (_) {}
-    return false;
-  }
-
-  /// Busca Python en el Registro de Windows (HKLM + HKCU)
-  static String? _findPythonInRegistry() {
-    try {
-      final result = Process.runSync(
-        'reg',
-        [
-          'query',
-          'HKLM\\SOFTWARE\\Python\\PythonCore',
-          '/s',
-          '/v',
-          'ExecutablePath',
-          '/reg:32',
-        ],
-        runInShell: true,
-      );
-
-      if (result.exitCode == 0) {
-        final output = (result.stdout as String);
-        final lines = output.split('\n');
-        for (final line in lines) {
-          final match = RegExp(r'ExecutablePath\s+REG_SZ\s+(.+\.exe)')
-              .firstMatch(line.trim());
-          if (match != null) {
-            final path = match.group(1)!.trim();
-            if (File(path).existsSync()) {
-              // Verificar versión
-              final test = Process.runSync(path, ['--version'],
-                  runInShell: true);
-              if (test.exitCode == 0 &&
-                  _isValidVersion((test.stdout as String).trim())) {
-                return path;
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {}
-
-    // Intentar también en HKCU (usuario actual)
-    try {
-      final result = Process.runSync(
-        'reg',
-        [
-          'query',
-          'HKCU\\SOFTWARE\\Python\\PythonCore',
-          '/s',
-          '/v',
-          'ExecutablePath',
-          '/reg:32',
-        ],
-        runInShell: true,
-      );
-
-      if (result.exitCode == 0) {
-        final output = (result.stdout as String);
-        final lines = output.split('\n');
-        for (final line in lines) {
-          final match = RegExp(r'ExecutablePath\s+REG_SZ\s+(.+\.exe)')
-              .firstMatch(line.trim());
-          if (match != null) {
-            final path = match.group(1)!.trim();
-            if (File(path).existsSync()) {
-              final test = Process.runSync(path, ['--version'],
-                  runInShell: true);
-              if (test.exitCode == 0 &&
-                  _isValidVersion((test.stdout as String).trim())) {
-                return path;
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {}
-
-    return null;
-  }
-
-  /// Busca Python en ubicaciones de instalación comunes
-  static String? _findPythonInCommonLocations() {
-    final drives = ['C:', 'D:'];
-    final versions = [
-      '314', '313', '312', '311', '310',
-      '39', '38', '37',
-    ];
-    final basePaths = [
-      r'\Users\%s\AppData\Local\Programs\Python',
-      r'\Program Files\Python',
-      r'\Python',
-    ];
-
-    try {
-      final username = Platform.environment['USERNAME'] ?? '';
-      for (final drive in drives) {
-        for (final base in basePaths) {
-          final basePath = base.contains('%s')
-              ? '$drive$base'.replaceAll('%s', username)
-              : '$drive$base';
-          for (final ver in versions) {
-            for (final suffix in ['', '-32']) {
-              final pythonPath =
-                  '$basePath\\Python$ver$suffix\\python.exe';
-              if (File(pythonPath).existsSync()) return pythonPath;
-            }
-          }
-        }
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  static String _getExeDir() {
-    try {
-      return File(Platform.resolvedExecutable).parent.path;
-    } catch (_) {
-      return Directory.current.path;
-    }
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// BackendManager: gestiona el ciclo de vida del proceso Python
-// ────────────────────────────────────────────────────────────────────────────
-
-class BackendManager {
-  Process? _process;
-  bool _killed = false;
-  bool _crashed = false;
-
-  bool get isRunning => _process != null;
-  bool get didCrash => _crashed;
-  bool get isKilled => _killed;
-
-  /// Inicia el backend. Retorna null si ok, o un mensaje de error.
-  Future<String?> start() async {
-    if (_process != null) return null;
-    _killed = false;
-    _crashed = false;
-
-    final pythonPath = await PythonFinder.findPython();
-    if (pythonPath == null) {
-      return 'Python no encontrado.\n\n'
-          'Instala Python 3.8+ desde python.org\n'
-          'marcando "Add Python to PATH" durante la instalación.\n\n'
-          'O ejecuta: python backend\\build_backend.py\n'
-          'para generar un backend.exe portátil.';
-    }
-
-    final isBundled = pythonPath.endsWith('backend.exe');
-    final scriptPath = _findBackendScript();
-    if (!isBundled && scriptPath == null) {
-      return 'No se encontró backend/main.py.\n'
-          'Asegúrate de que la carpeta backend/ esté presente.';
-    }
-
-    debugPrint('[Backend] Usando: $pythonPath');
-    if (!isBundled) debugPrint('[Backend] Script: $scriptPath');
-
-    try {
-      final args = isBundled ? <String>[] : [scriptPath!];
-      final workDir = isBundled
-          ? File(pythonPath).parent.path
-          : File(scriptPath!).parent.path;
-
-      _process = await Process.start(
-        pythonPath,
-        args,
-        workingDirectory: workDir,
-        environment: {'PYTHONUNBUFFERED': '1'},
-        mode: ProcessStartMode.normal,
-      );
-
-      _process!.stdout
-          .transform(utf8.decoder)
-          .listen((data) => debugPrint('[backend] $data'));
-      // stderr puede contener binary data de librerias nativas
-      // (OpenCV, InsightFace, etc.). Usar allowMalformed evita que el
-      // decoder lance excepciones y silencia el stream, permitiendo ver
-      // el traceback completo incluso si hay bytes corruptos.
-      _process!.stderr
-          .transform(const Utf8Decoder(allowMalformed: true))
-          .listen((data) => debugPrint('[backend-err] $data'));
-
-      // Watchdog: si el proceso termina inesperadamente, marcarlo
-      _process!.exitCode.then((code) {
-        debugPrint('Backend terminado (código: $code)');
-        if (!_killed && code != 0) {
-          _crashed = true;
-          _process = null;
-        } else if (_killed) {
-          _process = null;
-        }
-      });
-
-      return null;
-    } catch (e) {
-      return 'Error al iniciar el backend: $e';
-    }
-  }
-
-  String? _findBackendScript() {
-    final candidates = <String>[];
-    final exeDir = _getExeDir();
-    final cwd = Directory.current.path;
-
-    candidates.add(
-        '$exeDir${Platform.pathSeparator}backend${Platform.pathSeparator}main.py');
-    candidates.add(
-        '$cwd${Platform.pathSeparator}backend${Platform.pathSeparator}main.py');
-
-    var dir = Directory(exeDir);
-    for (var i = 0; i < 5; i++) {
-      candidates.add(
-          '${dir.path}${Platform.pathSeparator}backend'
-          '${Platform.pathSeparator}main.py');
-      dir = dir.parent;
-    }
-    dir = Directory(cwd);
-    for (var i = 0; i < 3; i++) {
-      candidates.add(
-          '${dir.path}${Platform.pathSeparator}backend'
-          '${Platform.pathSeparator}main.py');
-      dir = dir.parent;
-    }
-
-    for (final path in candidates) {
-      if (File(path).existsSync()) return path;
-    }
-    return null;
-  }
-
-  static String _getExeDir() {
-    try {
-      return File(Platform.resolvedExecutable).parent.path;
-    } catch (_) {
-      return Directory.current.path;
-    }
-  }
-
-  /// Mata el backend de forma controlada llamando primero la API.
-  Future<void> kill() async {
-    if (_process == null) return;
-    _killed = true;
-    final pid = _process!.pid;
-    await gracefulShutdownAsync(pid: pid);
-    _process = null;
-  }
-
-  /// Nuclear kill: método privado que mata procesos y limpia archivos.
-  static void _nuclearKill(int? pid) {
-    // 1. Por PID directo (más quirúrgico)
-    if (pid != null) {
-      try {
-        debugPrint('[shutdown] Taskkill por PID $pid...');
-        Process.runSync('taskkill', ['/F', '/T', '/PID', '$pid'],
-            runInShell: true);
-      } catch (_) {}
-    }
-
-    // 2. Por PID file
-    final pidFile = File('backend${Platform.pathSeparator}backend.pid');
-    if (pidFile.existsSync()) {
-      try {
-        final filePid = int.parse(pidFile.readAsStringSync().trim());
-        if (filePid != pid) {
-          debugPrint('[shutdown] Taskkill por PID file: $filePid...');
-          Process.runSync('taskkill', ['/F', '/PID', '$filePid'],
-              runInShell: true);
-        }
-      } catch (_) {}
-    }
-
-    // 3. Por nombre de imagen (python.exe + backend.exe)
-    for (final img in ['python.exe', 'backend.exe']) {
-      try {
-        debugPrint('[shutdown] Taskkill por imagen: $img...');
-        Process.runSync('taskkill', ['/F', '/IM', img], runInShell: true);
-      } catch (_) {}
-    }
-
-    // 4. Por puerto 5050 (último recurso)
-    try {
-      final result = Process.runSync('netstat', ['-ano'], runInShell: true);
-      if (result.exitCode == 0) {
-        for (final line in (result.stdout as String).split('\n')) {
-          if (line.contains(':5050') && line.contains('LISTENING')) {
-            final parts = line.trim().split(RegExp(r'\s+'));
-            if (parts.length >= 5) {
-              final portPid = parts.last;
-              if (portPid != '0' && portPid != '$pid') {
-                debugPrint('[shutdown] Taskkill por puerto 5050 - PID: $portPid');
-                Process.runSync('taskkill', ['/F', '/PID', portPid],
-                    runInShell: true);
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 5. Limpiar archivos residuales
-    _cleanupFiles();
-
-    debugPrint('[shutdown] Nuclear kill completado');
-  }
-
-  /// Limpia todos los archivos residuales del backend.
-  static void _cleanupFiles() {
-    final baseDir = 'backend';
-    final sep = Platform.pathSeparator;
-
-    // PID file
-    final pidFile = File('$baseDir${sep}backend.pid');
-    try {
-      if (pidFile.existsSync()) {
-        pidFile.deleteSync();
-        debugPrint('[cleanup] PID file eliminado');
-      }
-    } catch (_) {}
-
-    // Log file
-    final logFile = File('$baseDir${sep}backend.log');
-    try {
-      if (logFile.existsSync()) {
-        logFile.deleteSync();
-        debugPrint('[cleanup] Log file eliminado');
-      }
-    } catch (_) {}
-
-    // __pycache__ directorios
-    try {
-      if (Directory('$baseDir${sep}__pycache__').existsSync()) {
-        _deleteDirectoryRecursive(Directory('$baseDir${sep}__pycache__'));
-        debugPrint('[cleanup] __pycache__ eliminado');
-      }
-    } catch (_) {}
-
-    // build/ y dist/ generados por PyInstaller
-    for (final dir in ['build', 'dist']) {
-      try {
-        final dirPath = Directory('$baseDir${sep}$dir');
-        if (dirPath.existsSync()) {
-          _deleteDirectoryRecursive(dirPath);
-          debugPrint('[cleanup] $dir/ eliminado');
-        }
-      } catch (_) {}
-    }
-
-    // Archivos .spec de PyInstaller
-    try {
-      final specFile = File('$baseDir${sep}backend.spec');
-      if (specFile.existsSync()) {
-        specFile.deleteSync();
-        debugPrint('[cleanup] backend.spec eliminado');
-      }
-    } catch (_) {}
-
-    debugPrint('[cleanup] Archivos residuales eliminados');
-  }
-
-  /// Elimina un directorio recursivamente (equivalente a rm -rf).
-  /// Usa deleteSync(recursive: true) de Dart que es más simple y rápido.
-  static void _deleteDirectoryRecursive(Directory dir) {
-    if (!dir.existsSync()) return;
-    try {
-      dir.deleteSync(recursive: true);
-    } catch (_) {}
-  }
-
-  /// Cierre limpio con await. Úsalo en _restartBackend() y similares.
-  /// 1. Llama /api/shutdown → Python corre su finally (libera cámara, borra PID file)
-  /// 2. Espera hasta [gracePeriod] a que el proceso muera solo
-  /// 3. Si no murió, nuclear kill como fallback
-  static Future<void> gracefulShutdownAsync({
-    int? pid,
-    Duration gracePeriod = const Duration(seconds: 4),
-  }) async {
-    debugPrint('[shutdown] Iniciando graceful shutdown...');
-
-    // Paso 1: Pedir al backend que se apague limpiamente
-    bool apiOk = false;
-    try {
-      final response = await http
-          .post(
-            Uri.parse('http://$_backendHost:$_backendPort/api/shutdown'),
-          )
-          .timeout(const Duration(seconds: 2));
-      apiOk = response.statusCode == 200;
-      debugPrint('[shutdown] API /api/shutdown respondió: ${response.statusCode}');
-    } catch (e) {
-      // El backend ya puede estar muerto — no es error fatal
-      debugPrint('[shutdown] API no respondió (backend ya cerrado?): $e');
-    }
-
-    if (!apiOk || pid == null) {
-      // Si la API falló o no tenemos PID, nuclear directo
-      _nuclearKill(pid);
-      return;
-    }
-
-    // Paso 2: Esperar a que el proceso muera solo (Python corre su finally)
-    final deadline = DateTime.now().add(gracePeriod);
-    bool processDied = false;
-
-    while (DateTime.now().isBefore(deadline)) {
-      await Future.delayed(const Duration(milliseconds: 300));
-      // Verificar si el proceso ya no existe
-      try {
-        final check = await Process.run(
-          'tasklist',
-          ['/FI', 'PID eq $pid', '/NH'],
-          runInShell: true,
-        );
-        final output = check.stdout as String;
-        if (!output.contains('$pid')) {
-          processDied = true;
-          debugPrint('[shutdown] Proceso $pid terminó limpiamente');
-          break;
-        }
-      } catch (_) {
-        processDied = true; // Si tasklist falla, asumimos que murió
-        break;
-      }
-    }
-
-    // Paso 3: Fallback nuclear solo si el proceso sobrevivió la espera
-    if (!processDied) {
-      debugPrint('[shutdown] Proceso $pid no respondió en ${gracePeriod.inSeconds}s — nuclear kill');
-      _nuclearKill(pid);
-    }
-  }
-
-  /// Versión síncrona para usar en dispose() donde no puedes hacer await.
-  /// Llama la API en fire-and-forget y luego nuclear kill con delay mínimo.
-  /// No es perfecta pero es mejor que matar directo sin avisar al backend.
-  static void gracefulShutdown({int? pid}) {
-    debugPrint('[shutdown] Graceful shutdown (sync)...');
-
-    // Fire-and-forget correcto en Dart: unawaited con try/catch interno.
-    () async {
-      try {
-        await http
-            .post(Uri.parse('http://$_backendHost:$_backendPort/api/shutdown'))
-            .timeout(const Duration(milliseconds: 500));
-      } catch (_) {}
-    }();
-
-    sleep(const Duration(milliseconds: 600));
-    _nuclearKill(pid);
-  }
-
-  /// Guard para evitar ejecutar killAll() múltiples veces.
-  static bool _cleanedUp = false;
-
-  /// Mata TODO: todos los procesos, libera puerto 5050, elimina archivos.
-  /// No depende de _process — usa PID file, nombre de imagen, puerto, y más.
-  /// Es SINCRONO para usarse en dispose(). Solo se ejecuta una vez.
-  static void killAll() {
-    if (_cleanedUp) {
-      debugPrint('[killAll] Saltando — ya se ejecutó la limpieza en detached');
-      return;
-    }
-    _cleanedUp = true;
-
-    debugPrint('[killAll] === INICIANDO LIMPIEZA TOTAL ===');
-
-    // 1. Matar por PID file (backend.pid)
-    final pidFile = File('backend${Platform.pathSeparator}backend.pid');
-    if (pidFile.existsSync()) {
-      try {
-        final pid = int.parse(pidFile.readAsStringSync().trim());
-        debugPrint('[killAll] Matando por PID file: $pid');
-        Process.runSync('taskkill', ['/F', '/T', '/PID', '$pid'],
-            runInShell: true);
-      } catch (_) {}
-    }
-
-    // 2. Matar por nombre de imagen (python.exe + backend.exe)
-    for (final img in ['python.exe', 'backend.exe']) {
-      try {
-        debugPrint('[killAll] Matando por imagen: $img...');
-        Process.runSync('taskkill', ['/F', '/IM', img], runInShell: true);
-      } catch (_) {}
-    }
-
-    // 3. Matar por puerto 5050 (netstat + taskkill)
-    try {
-      final result = Process.runSync('netstat', ['-ano'], runInShell: true);
-      if (result.exitCode == 0) {
-        final lines = (result.stdout as String).split('\n');
-        for (final line in lines) {
-          if (line.contains(':5050') && line.contains('LISTENING')) {
-            final parts = line.trim().split(RegExp(r'\s+'));
-            if (parts.length >= 5) {
-              final pid = parts.last;
-              if (pid != '0') {
-                debugPrint('[killAll] Matando por puerto 5050 - PID: $pid');
-                Process.runSync(
-                    'taskkill', ['/F', '/PID', pid], runInShell: true);
-              }
-            }
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 4. Limpiar archivos residuales
-    _cleanupFiles();
-
-    debugPrint('[killAll] === LIMPIEZA TOTAL COMPLETADA ===');
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Estado
-// ────────────────────────────────────────────────────────────────────────────
-
-class _BackendState {
-  String status = 'starting';
-  int cameraIndex = 0;
-  String cameraName = 'Cámara 0';
-  String? lastPersonName;
-  String? lastSnapshotUrl;
-  Map<String, dynamic>? lastDetection;
-  double fps = 0;
-  int totalDetections = 0;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// App
-// ────────────────────────────────────────────────────────────────────────────
-
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Modo kiosko: pantalla completa sin bordes, no cerrable con Alt+F4
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await windowManager.ensureInitialized();
+    const options = WindowOptions(
+      fullScreen: false,
+      titleBarStyle: TitleBarStyle.hidden,
+      skipTaskbar: false,
+    );
+    await windowManager.waitUntilReadyToShow(options, () async {
+      await windowManager.maximize();
+      await windowManager.setResizable(true);
+    });
+  }
+
   runApp(const FaceRecognitionApp());
 }
 
@@ -703,17 +58,101 @@ class FaceRecognitionApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const RecognitionScreen(),
+      home: const _AppRoot(),
     );
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Pantalla principal
-// ────────────────────────────────────────────────────────────────────────────
+// ─── Raíz: decide entre login y pantalla principal ────────────────────────────
+
+class _AppRoot extends StatefulWidget {
+  const _AppRoot();
+
+  @override
+  State<_AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<_AppRoot> {
+  bool _checking = true;
+  bool _loggedIn  = false;
+  String? _companyId;
+  String? _companyName;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    final loggedIn = await AuthService.instance.loadSession();
+    if (mounted) {
+      setState(() {
+        _checking    = false;
+        _loggedIn    = loggedIn;
+        _companyId   = AuthService.instance.companyId;
+        _companyName = AuthService.instance.companyName;
+      });
+    }
+  }
+
+  void _onLoginSuccess(String companyId, String companyName) {
+    setState(() {
+      _loggedIn    = true;
+      _companyId   = companyId;
+      _companyName = companyName;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0D1117),
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.cyanAccent),
+        ),
+      );
+    }
+
+    if (!_loggedIn) {
+      return CompanyLoginScreen(onLoginSuccess: _onLoginSuccess);
+    }
+
+    return RecognitionScreen(
+      companyId:   _companyId!,
+      companyName: _companyName!,
+    );
+  }
+}
+
+// ─── Estado ──────────────────────────────────────────────────────────────────
+
+class _BackendState {
+  String status = 'starting';
+  int cameraIndex = 0;
+  String cameraName = 'Cámara 0';
+  String? lastPersonName;
+  String? lastSnapshotUrl;
+  Map<String, dynamic>? lastDetection;
+  double fps = 0;
+  int totalDetections = 0;
+  bool supabaseOnline = false;
+  int offlinePending = 0;
+  String deviceUid = '';
+}
+
+// ─── Pantalla principal ───────────────────────────────────────────────────────
 
 class RecognitionScreen extends StatefulWidget {
-  const RecognitionScreen({super.key});
+  final String companyId;
+  final String companyName;
+
+  const RecognitionScreen({
+    super.key,
+    required this.companyId,
+    required this.companyName,
+  });
 
   @override
   State<RecognitionScreen> createState() => _RecognitionScreenState();
@@ -723,18 +162,27 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     with WidgetsBindingObserver {
   final _backendManager = BackendManager();
   final _backendState = _BackendState();
-  final _sourceService = SourceService(host: _backendHost, port: _backendPort);
+  final _sourceService = SourceService();
+  final _sourceController = SourceSelectorController();
+
   Timer? _pollTimer;
   Timer? _frameTimer;
-  final _sourceController = SourceSelectorController();
+
   bool _backendReady = false;
   bool _startingUp = true;
   String? _errorMessage;
   Uint8List? _currentFrame;
-
-  // Heartbeat: contador de fallos consecutivos
   int _heartbeatFails = 0;
   static const int _maxHeartbeatFails = 3;
+
+  // Auto-restart con backoff exponencial
+  int _autoRestartAttempts = 0;
+  static const int _maxAutoRestartAttempts = 3;
+  Timer? _autoRestartTimer;
+
+  // Kiosk: triple tap en el título para abrir PIN
+  int _titleTapCount = 0;
+  Timer? _tapResetTimer;
 
   @override
   void initState() {
@@ -748,25 +196,46 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _frameTimer?.cancel();
-    // Cierre TOTAL: mata procesos, libera puerto 5050, elimina archivos
+    _autoRestartTimer?.cancel();
+    _tapResetTimer?.cancel();
     BackendManager.killAll();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // En Windows, 'inactive' se emite durante el arranque y al perder foco.
-    // Solo hacer limpieza total en 'detached' (cierre real de la app).
     if (state == AppLifecycleState.detached) {
-      debugPrint('[lifecycle] detached — iniciando limpieza total');
       _pollTimer?.cancel();
       _frameTimer?.cancel();
       BackendManager.killAll();
     }
   }
 
+  Future<void> _logout() async {
+    _pollTimer?.cancel();
+    _frameTimer?.cancel();
+    await BackendManager.gracefulShutdownAsync(pid: _backendManager.pid);
+    await AuthService.instance.logout();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => CompanyLoginScreen(
+          onLoginSuccess: (id, name) {
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(
+                builder: (_) => RecognitionScreen(companyId: id, companyName: name),
+              ),
+              (_) => false,
+            );
+          },
+        ),
+      ),
+      (_) => false,
+    );
+  }
+
   Future<void> _startBackend() async {
-    final error = await _backendManager.start();
+    final error = await _backendManager.start(companyId: widget.companyId);
     if (error != null) {
       setState(() {
         _errorMessage = error;
@@ -779,7 +248,6 @@ class _RecognitionScreenState extends State<RecognitionScreen>
 
   Future<void> _waitForBackend({int maxRetries = 30}) async {
     for (var i = 0; i < maxRetries; i++) {
-      // Si el proceso ya se cayó mientras esperábamos
       if (_backendManager.didCrash) {
         setState(() {
           _errorMessage = 'El backend se cerró inesperadamente.';
@@ -792,7 +260,12 @@ class _RecognitionScreenState extends State<RecognitionScreen>
             .get(Uri.parse('http://$_backendHost:$_backendPort/api/health'))
             .timeout(const Duration(seconds: 2));
         if (response.statusCode == 200) {
-          debugPrint('Backend listo!');
+          // Cargar token antes de arrancar polling
+          final dir = _backendManager.backendDir;
+          if (dir != null) {
+            await BackendClient.instance
+                .loadToken(dir, instanceId: _backendManager.instanceId);
+          }
           setState(() {
             _backendReady = true;
             _startingUp = false;
@@ -813,6 +286,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
   }
 
   void _startPolling() {
+    _autoRestartAttempts = 0; // reset backoff al conectar exitosamente
     _pollTimer?.cancel();
     _pollTimer =
         Timer.periodic(const Duration(seconds: 1), (_) => _fetchStatus());
@@ -829,61 +303,56 @@ class _RecognitionScreenState extends State<RecognitionScreen>
 
   Future<void> _fetchFrame() async {
     try {
+      // /api/snapshot es público — no requiere token
       final response = await http
-          .get(
-            Uri.parse('http://$_backendHost:$_backendPort/api/snapshot'),
-          )
+          .get(Uri.parse('http://$_backendHost:$_backendPort/api/snapshot'))
           .timeout(const Duration(seconds: 1));
       if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
         if (!mounted) return;
-        setState(() {
-          _currentFrame = response.bodyBytes;
-        });
+        setState(() => _currentFrame = response.bodyBytes);
       }
-    } catch (_) {
-      // Error fetching frame — continuar con el último frame
-    }
+    } catch (_) {}
   }
 
   Future<void> _fetchStatus() async {
     try {
-      final response = await http
-          .get(Uri.parse('http://$_backendHost:$_backendPort/api/status'))
+      final response = await BackendClient.instance
+          .get('/api/status')
           .timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
-        _heartbeatFails = 0; // Resetear contador
+        _heartbeatFails = 0;
         final data = json.decode(response.body) as Map<String, dynamic>;
         setState(() {
           _backendState.status = data['status'] as String? ?? 'unknown';
-          _backendState.cameraName = data['camera_name'] as String? ?? 'Cámara';
-          _backendState.lastPersonName = data['last_person_name'] as String?;
-          _backendState.lastSnapshotUrl = data['last_snapshot_url'] as String?;
+          _backendState.cameraName =
+              data['camera_name'] as String? ?? 'Cámara';
+          _backendState.lastPersonName =
+              data['last_person_name'] as String?;
+          _backendState.lastSnapshotUrl =
+              data['last_snapshot_url'] as String?;
           _backendState.fps = (data['fps'] as num?)?.toDouble() ?? 0;
-          _backendState.totalDetections = data['total_detections'] as int? ?? 0;
+          _backendState.totalDetections =
+              data['total_detections'] as int? ?? 0;
           _backendState.lastDetection =
               data['last_detection'] as Map<String, dynamic>?;
+          _backendState.supabaseOnline =
+              data['supabase_online'] as bool? ?? false;
+          _backendState.offlinePending =
+              data['offline_pending'] as int? ?? 0;
+          _backendState.deviceUid =
+              data['device_uid'] as String? ?? '';
         });
       }
     } catch (_) {
-      // Heartbeat: contar fallos consecutivos
       _heartbeatFails++;
-      if (_heartbeatFails >= _maxHeartbeatFails) {
-        // El backend dejó de responder
-        if (_backendManager.didCrash) {
-          setState(() {
-            _errorMessage = 'El backend se cerró inesperadamente.\n'
-                'Puedes reintentar para reiniciarlo.';
-            _backendReady = false;
-            _currentFrame = null;
-          });
-          _pollTimer?.cancel();
-          _frameTimer?.cancel();
-        }
+      if (_heartbeatFails >= _maxHeartbeatFails && _backendManager.didCrash) {
+        _scheduleAutoRestart();
       }
     }
   }
 
   Future<void> _restartBackend() async {
+    _autoRestartTimer?.cancel();
     setState(() {
       _errorMessage = null;
       _startingUp = true;
@@ -893,8 +362,34 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     });
     _pollTimer?.cancel();
     _frameTimer?.cancel();
-    await BackendManager.gracefulShutdownAsync(pid: _backendManager._process?.pid);
+    await BackendManager.gracefulShutdownAsync(pid: _backendManager.pid);
     await _startBackend();
+  }
+
+  void _scheduleAutoRestart() {
+    if (_autoRestartAttempts >= _maxAutoRestartAttempts) {
+      setState(() {
+        _errorMessage =
+            'El backend falló $_maxAutoRestartAttempts veces consecutivas.\n'
+            'Revisa la cámara o reinicia manualmente.';
+        _backendReady = false;
+        _currentFrame = null;
+      });
+      return;
+    }
+    _autoRestartAttempts++;
+    final delaySec = pow(2, _autoRestartAttempts).toInt(); // 2s, 4s, 8s
+    debugPrint(
+        '[auto-restart] Intento $_autoRestartAttempts en ${delaySec}s...');
+    setState(() {
+      _errorMessage =
+          'Backend caído. Reiniciando automáticamente (intento $_autoRestartAttempts/$_maxAutoRestartAttempts)...';
+      _backendReady = false;
+      _currentFrame = null;
+    });
+    _pollTimer?.cancel();
+    _frameTimer?.cancel();
+    _autoRestartTimer = Timer(Duration(seconds: delaySec), _restartBackend);
   }
 
   void _onSourceChanged(SourceInfo source) {
@@ -904,19 +399,209 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     });
   }
 
+  // ─── Exportar SQLite offline ──────────────────────────────────────────────
+
+  Future<void> _exportOfflineDb() async {
+    try {
+      final response = await BackendClient.instance
+          .get('/api/export-offline-db')
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 404) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay registros offline pendientes')),
+        );
+        return;
+      }
+      if (response.statusCode != 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al exportar: ${response.statusCode}')),
+        );
+        return;
+      }
+      // Guardar en carpeta Documents del usuario
+      final docsDir = Platform.environment['USERPROFILE'] ?? '.';
+      final now = DateTime.now();
+      final ts = '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+      final dest = '$docsDir\\Documents\\offline_records_$ts.db';
+      await File(dest).writeAsBytes(response.bodyBytes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Base offline exportada a: $dest')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error exportando: $e')),
+      );
+    }
+  }
+
+  // ─── Limpiar caché ────────────────────────────────────────────────────────
+
+  Future<void> _clearCache() async {
+    try {
+      final response = await BackendClient.instance
+          .post('/api/clear-cache')
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final mb = (data['freed_mb'] as num?)?.toStringAsFixed(2) ?? '0.00';
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Caché limpiada — $mb MB liberados')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al limpiar caché: $e')),
+      );
+    }
+  }
+
+  // ─── Kiosk exit ───────────────────────────────────────────────────────────
+
+  Future<void> _handleKioskExit() async {
+    final ok = await KioskPinDialog.show(context);
+    if (ok && mounted) {
+      await windowManager.setFullScreen(false);
+      await windowManager.setClosable(true);
+      await windowManager.restore();
+    }
+  }
+
+  // ─── Connection badge ─────────────────────────────────────────────────────
+
+  Widget _buildConnectionBadge() {
+    final online = _backendState.supabaseOnline;
+    final pending = _backendState.offlinePending;
+    return Tooltip(
+      message: online
+          ? 'Supabase conectado'
+          : 'Sin conexión a Supabase${pending > 0 ? " — $pending registros pendientes" : ""}',
+      child: Container(
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: (online ? Colors.greenAccent : Colors.redAccent)
+              .withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: (online ? Colors.greenAccent : Colors.redAccent)
+                .withValues(alpha: 0.5),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: online ? Colors.greenAccent : Colors.redAccent,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              online ? 'ON' : 'OFF',
+              style: TextStyle(
+                color: online ? Colors.greenAccent : Colors.redAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (!online && pending > 0) ...[
+              const SizedBox(width: 4),
+              Text(
+                '($pending)',
+                style: const TextStyle(color: Colors.orangeAccent, fontSize: 10),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Build ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text(
-          'BioFace - Reconocimiento Facial',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        title: GestureDetector(
+          // Triple tap en el título → pide PIN para salir del kiosko
+          onTap: () {
+            _tapResetTimer?.cancel();
+            _titleTapCount++;
+            if (_titleTapCount >= 3) {
+              _titleTapCount = 0;
+              _handleKioskExit();
+            } else {
+              _tapResetTimer = Timer(const Duration(seconds: 2), () {
+                _titleTapCount = 0;
+              });
+            }
+          },
+          child: const Text(
+            'BioFace',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          ),
         ),
-        centerTitle: true,
+        centerTitle: false,
         backgroundColor: const Color(0xFF1A237E),
         elevation: 0,
         automaticallyImplyLeading: false,
+        actions: [
+          // Indicador conexión Supabase
+          if (_backendReady) _buildConnectionBadge(),
+          IconButton(
+            icon: const Icon(Icons.grid_view_rounded, size: 22),
+            tooltip: 'Modo multi-cámara',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => MultiCameraSetupScreen(
+                    companyId: widget.companyId,
+                    companyName: widget.companyName,
+                  ),
+                ),
+              );
+            },
+          ),
+          // Menú de mantenimiento
+          if (_backendReady)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 22),
+              tooltip: 'Mantenimiento',
+              onSelected: (value) {
+                if (value == 'export_db') _exportOfflineDb();
+                if (value == 'clear_cache') _clearCache();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'export_db',
+                  child: Row(children: [
+                    Icon(Icons.download_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('Exportar BD offline'),
+                  ]),
+                ),
+                PopupMenuItem(
+                  value: 'clear_cache',
+                  child: Row(children: [
+                    Icon(Icons.cleaning_services_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('Limpiar caché'),
+                  ]),
+                ),
+              ],
+            ),
+        ],
       ),
       body: _buildBody(),
     );
@@ -991,7 +676,8 @@ class _RecognitionScreenState extends State<RecognitionScreen>
 
   Widget _buildMainUI() {
     final isLive = _backendState.status == 'running';
-    final indicatorColor = isLive ? Colors.greenAccent : Colors.orangeAccent;
+    final indicatorColor =
+        isLive ? Colors.greenAccent : Colors.orangeAccent;
     final indicatorText = isLive ? 'EN VIVO' : 'PAUSADO';
 
     return Column(
@@ -1026,6 +712,18 @@ class _RecognitionScreenState extends State<RecognitionScreen>
               const SizedBox(width: 16),
               Text('Detectados: ${_backendState.totalDetections}',
                   style: const TextStyle(color: Colors.white60, fontSize: 12)),
+              const SizedBox(width: 12),
+              Tooltip(
+                message: 'Empresa: ${widget.companyName}\nCerrar sesión',
+                child: InkWell(
+                  onTap: _logout,
+                  borderRadius: BorderRadius.circular(20),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.logout, size: 18, color: Colors.white38),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1034,7 +732,11 @@ class _RecognitionScreenState extends State<RecognitionScreen>
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                _buildCameraSelector(),
+                SourceSelector(
+                  sourceService: _sourceService,
+                  controller: _sourceController,
+                  onSourceChanged: _onSourceChanged,
+                ),
                 const SizedBox(height: 16),
                 Expanded(child: _buildPreviewArea()),
                 const SizedBox(height: 16),
@@ -1047,17 +749,9 @@ class _RecognitionScreenState extends State<RecognitionScreen>
     );
   }
 
-  Widget _buildCameraSelector() {
-    return SourceSelector(
-      sourceService: _sourceService,
-      controller: _sourceController,
-      onSourceChanged: _onSourceChanged,
-    );
-  }
-
   Widget _buildPreviewArea() {
-    final bool hasFrame = _currentFrame != null && _currentFrame!.isNotEmpty;
-    final bool hasOverlay = _backendState.lastPersonName != null;
+    final hasFrame = _currentFrame != null && _currentFrame!.isNotEmpty;
+    final hasOverlay = _backendState.lastPersonName != null;
 
     return Container(
       decoration: BoxDecoration(
@@ -1069,18 +763,15 @@ class _RecognitionScreenState extends State<RecognitionScreen>
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Video en vivo desde /api/snapshot (headless backend)
           if (hasFrame)
             Image.memory(
               _currentFrame!,
               fit: BoxFit.contain,
               gaplessPlayback: true,
-              errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+              errorBuilder: (ctx, err, st) => _buildPlaceholder(),
             )
           else
             _buildPlaceholder(),
-
-          // Overlay inferior con nombre de la persona detectada
           if (hasOverlay)
             Positioned(
               bottom: 0, left: 0, right: 0,
@@ -1098,7 +789,8 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                   ),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.person, color: Colors.cyanAccent, size: 20),
+                  const Icon(Icons.person,
+                      color: Colors.cyanAccent, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -1122,8 +814,6 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                 ]),
               ),
             ),
-
-          // Indicador de "EN VIVO" en la esquina superior
           if (hasFrame)
             Positioned(
               top: 8, left: 8,
@@ -1138,22 +828,19 @@ class _RecognitionScreenState extends State<RecognitionScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 6,
-                      height: 6,
+                      width: 6, height: 6,
                       decoration: const BoxDecoration(
                         color: Colors.greenAccent,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const Text(
-                      'EN VIVO',
-                      style: TextStyle(
-                        color: Colors.greenAccent,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    const Text('EN VIVO',
+                        style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        )),
                   ],
                 ),
               ),
@@ -1164,7 +851,7 @@ class _RecognitionScreenState extends State<RecognitionScreen>
   }
 
   Widget _buildPlaceholder() {
-    final bool isLive = _backendState.status == 'running';
+    final isLive = _backendState.status == 'running';
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -1203,11 +890,13 @@ class _RecognitionScreenState extends State<RecognitionScreen>
         ),
       );
     }
+
     final personName = detection['full_name'] as String? ?? 'Desconocido';
     final result = detection['result'] as String? ?? 'unknown';
     final similarity = (detection['similarity'] as num?) ?? 0;
     final isAuthorized = result == 'authorized';
-    final resultColor = isAuthorized ? Colors.greenAccent : Colors.orangeAccent;
+    final resultColor =
+        isAuthorized ? Colors.greenAccent : Colors.orangeAccent;
     final resultIcon = isAuthorized ? Icons.check_circle : Icons.help;
 
     return Container(

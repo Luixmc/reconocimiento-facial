@@ -3,7 +3,7 @@
 > **Módulo de captura facial para empleados** — parte del ecosistema BioFace.
 >
 > Este componente corre directamente en los puestos de entrada de los empleados.
-> No requiere login. Solo cámara. Detecta el rostro, identifica a la persona,
+> Login por ID de empresa (UUID). Detecta el rostro, identifica a la persona,
 > registra entrada/salida y envía la foto a Supabase para que el dashboard
 > la visualice en tiempo real.
 >
@@ -27,6 +27,8 @@
 - [API HTTP (para Flutter)](#api-http-para-flutter)
 - [Rate limiting y anti-spam](#rate-limiting-y-anti-spam)
 - [Base de datos (Supabase)](#base-de-datos-supabase)
+- [Login de empresa](#login-de-empresa)
+- [Seguridad y multi-tenant](#seguridad-y-multi-tenant)
 - [Roadmap SaaS](#roadmap-saas)
 - [Licencia](#licencia)
 
@@ -79,30 +81,34 @@
 | **Auto-inicio** | Flutter detecta Python y arranca el backend automáticamente |
 | **Auto-cierre** | Al cerrar Flutter, el backend se mata por PID, nombre y puerto |
 | **Sin dependencias UI** | No requiere monitor para el backend — corre en segundo plano |
+| **Login por empresa** | La app valida el ID de empresa contra Supabase antes de arrancar |
+| **Multi-tenant** | COMPANY_ID se inyecta al backend como env var en tiempo de ejecución |
 
 ---
 
 ## 🔄 Flujo de operación
 
-1. **Inicio**: El usuario abre la app → Flutter detecta Python automáticamente
-   y lanza el backend
-2. **Cámara**: Se abre la cámara por defecto (o la seleccionada). El backend
+1. **Login**: El usuario abre la app → pantalla de login → ingresa el UUID de
+   empresa → Flutter valida contra Supabase (empresa + licencia activa) → sesión
+   guardada en SharedPreferences
+2. **Inicio**: Backend arranca con `COMPANY_ID` inyectado como variable de entorno
+3. **Cámara**: Se abre la cámara por defecto (o la seleccionada). El backend
    procesa frames sin mostrar ventanas
-3. **Video en vivo**: Flutter obtiene frames vía `/api/snapshot` y los muestra
+4. **Video en vivo**: Flutter obtiene frames vía `/api/snapshot` y los muestra
    en tiempo real dentro de la app
-4. **Detección**: InsightFace analiza cada frame (saltando N frames para
+5. **Detección**: InsightFace analiza cada frame (saltando N frames para
    rendimiento)
-5. **Captura**: Cuando detecta un rostro con confianza ≥ 0.7 **y** respeta
+6. **Captura**: Cuando detecta un rostro con confianza ≥ 0.7 **y** respeta
    el rate limiting → captura EXACTAMENTE 1 foto
-6. **Reconocimiento**: Compara el embedding facial contra los registrados en
+7. **Reconocimiento**: Compara el embedding facial contra los registrados en
    Supabase
-7. **Registro**: Crea en la BD:
+8. **Registro**: Crea en la BD:
    - `access_record` (evento de detección)
    - `attendance` + `attendance_mark` (entrada o salida)
-8. **Storage**: Sube la foto a Supabase Storage (visible desde el dashboard)
-9. **Cooldown**: Espera 3 segundos antes de capturar a la misma persona
-   nuevamente
-10. **Cierre**: Al cerrar Flutter → `BackendManager.killAll()` mata el backend
+9. **Storage**: Sube la foto a Supabase Storage (visible desde el dashboard)
+10. **Cooldown**: Espera 3 segundos antes de capturar a la misma persona
+    nuevamente
+11. **Cierre**: Al cerrar Flutter → `BackendManager.killAll()` mata el backend
     por PID file, nombre de imagen y puerto 5050
 
 ---
@@ -113,7 +119,7 @@
 |-----------|-----------|---------|
 | Lenguaje backend | Python | ≥ 3.8 |
 | Framework web | Flask | 3.x |
-| Detección facial | InsightFace (buffalo_l) | 1.x |
+| Detección facial | InsightFace (buffalo_s) | 1.x |
 | Visión artificial | OpenCV | 4.x |
 | Cliente HTTP | requests | 2.x |
 | UI (única) | Flutter | 3.x |
@@ -297,15 +303,25 @@ y mata el backend inmediatamente, incluso antes de que `dispose()` se ejecute.
 
 ## 🔌 API HTTP (para Flutter)
 
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/status` | GET | Estado actual (cámara, fps, última detección) |
-| `/api/cameras` | GET | Lista cámaras disponibles (con nombre y backend) |
-| `/api/camera/select` | POST | Cambiar cámara activa |
-| `/api/camera/test` | GET | Capturar frame de prueba y diagnosticar cámara |
-| `/api/snapshot` | GET | Último frame como JPEG (para video en vivo) |
-| `/api/refresh-embeddings` | POST | Recargar embeddings desde Supabase |
+Todos los endpoints excepto `/api/health`, `/api/snapshot` y `/api/shutdown`
+requieren cabecera `X-Backend-Token` con el token generado al arrancar el backend.
+
+| Endpoint | Método | Auth | Descripción |
+|----------|--------|------|-------------|
+| `/api/health` | GET | ✗ | Health check |
+| `/api/snapshot` | GET | ✗ | Último frame como JPEG (video en vivo) |
+| `/api/status` | GET | ✓ | Estado actual (cámara, fps, última detección) |
+| `/api/cameras` | GET | ✓ | Lista cámaras disponibles (con nombre y backend) |
+| `/api/camera/select` | POST | ✓ | Cambiar cámara activa |
+| `/api/camera/test` | GET | ✓ | Capturar frame de prueba y diagnosticar cámara |
+| `/api/source/status` | GET | ✓ | Estado de la fuente de video |
+| `/api/source/list` | GET | ✓ | Lista todas las fuentes disponibles |
+| `/api/source/select` | POST | ✓ | Seleccionar fuente (USB, DroidCam, RTSP) |
+| `/api/source/scan-droidcam` | POST | ✓ | Escanear red local buscando DroidCam |
+| `/api/refresh-embeddings` | POST | ✓ | Recargar embeddings desde Supabase |
+| `/api/persons` | GET | ✓ | Listar personas disponibles para enrollment |
+| `/api/enroll` | POST | ✓ | Enrollment facial remoto (multipart: person_id + image) |
+| `/api/shutdown` | POST | ✗ | Apagar backend limpiamente |
 
 ---
 
@@ -337,10 +353,23 @@ Mecanismos para evitar sobrecargar Supabase:
 | `companies` | Empresas registradas |
 | `registered_persons` | Empleados de cada empresa |
 | `face_embeddings` | Vectores faciales (512d) para reconocimiento |
-| `access_records` | Cada detección facial (con foto) |
+| `access_records` | Cada detección facial (resultado + similitud) |
 | `attendances` | Jornadas laborales (entrada/salida) |
 | `attendance_marks` | Marcaciones específicas (entry/exit) |
+| `attendance_rules` | Reglas horarias por empresa |
+| `person_schedules` | Horario asignado por persona |
 | `company_operators` | Administradores del sistema |
+| `areas` | Áreas/departamentos de la empresa |
+| `devices` | Dispositivos de captura registrados |
+| `system_settings` | Configuración por empresa |
+
+### Tablas de infraestructura SaaS (nuevas)
+
+| Tabla | Propósito |
+|-------|-----------|
+| `backend_logs` | Logs remotos del backend (WARNING+), con isolación por empresa |
+| `licenses` | Licencias activas por empresa; validadas al arrancar |
+| `app_versions` | Versiones publicadas para OTA; comparación semver automática |
 
 ### Bucket de Storage
 
@@ -348,66 +377,248 @@ Mecanismos para evitar sobrecargar Supabase:
 - **Visibilidad:** Público (para que el dashboard cargue las imágenes)
 - **Contenido:** Fotos de detección + enrollment
 
+### Configuración de entorno
+
+El backend usa `.env` (nunca commitear):
+
+```env
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_KEY=tu_service_role_key
+COMPANY_ID=uuid-de-tu-empresa
+```
+
+Copiar `backend/.env.example` como punto de partida.
+
+---
+
+## 🔐 Login de empresa
+
+Al abrir la app, se muestra una pantalla de login antes de arrancar el backend.
+
+### Flujo de autenticación
+
+```
+App abre
+   │
+   ├── SharedPreferences → ¿hay sesión guardada?
+   │       │
+   │      SÍ ──────────────────────────────────────────┐
+   │       │                                            │
+   │       NO                                           ▼
+   │       │                               RecognitionScreen
+   │       ▼                               (backend arranca con
+   │  CompanyLoginScreen                    COMPANY_ID correcto)
+   │  (campo UUID de empresa)
+   │       │
+   │       ▼
+   │  validate_company_login() ──► Supabase RPC (anon key)
+   │       │                       · companies: ¿existe?
+   │       │                       · licenses:  ¿activa? ¿no expirada?
+   │       │
+   │      ERROR ──► mensaje en pantalla
+   │       │
+   │      OK  ──► guardar en SharedPreferences ──► RecognitionScreen
+```
+
+### Seguridad del login
+
+- El ID de empresa es un UUID v4 — 2¹²² combinaciones posibles, no adivinable
+- La validación usa la función `validate_company_login()` con SECURITY DEFINER:
+  el anon key no puede leer las tablas directamente; solo obtiene el resultado
+  de la función (nombre de empresa + estado de licencia)
+- La sesión se persiste localmente; el backend siempre recibe el `COMPANY_ID`
+  como variable de entorno en cada arranque, nunca hardcodeado
+- Logout: apaga el backend limpiamente y borra la sesión de disco
+
+### Archivos involucrados
+
+| Archivo | Rol |
+|---------|-----|
+| `lib/services/auth_service.dart` | Lógica de validación RPC + persistencia SharedPreferences |
+| `lib/screens/company_login.dart` | Pantalla de login (UUID input + paste + error UI) |
+| `lib/services/backend_manager.dart` | `start({companyId})` → pasa `COMPANY_ID` como env var |
+| `lib/main.dart` | `_AppRoot` → decide entre login y pantalla principal al arrancar |
+
+---
+
+## 🏢 Seguridad y multi-tenant
+
+### Row Level Security (RLS)
+
+Todas las tablas tienen RLS activado con políticas por rol:
+
+| Rol JWT | Acceso |
+|---------|--------|
+| `root` | Todas las empresas (superadmin del SaaS) |
+| `admin` | Solo su empresa (lectura + escritura) |
+| `viewer` | Solo su empresa (solo lectura) |
+| `anon` | Solo via función `validate_company_login()` |
+
+El rol se lee del JWT via `jwt_role()` → `user_metadata.role` o `app_metadata.role`.
+La empresa se obtiene via `get_my_company_id()` → `profiles.company_id` donde `id = auth.uid()`.
+
+### Multi-tenant por empresa
+
+- El backend Python usa `service_role` (bypassa RLS) con filtros explícitos `WHERE company_id = COMPANY_ID`
+- El `COMPANY_ID` se inyecta como env var al proceso Python desde Flutter al momento de login
+- La función `set_company_context(uuid)` está disponible vía RPC para triggers y funciones que necesiten el contexto de empresa en operaciones batch
+- El panel admin y dashboard usan JWT con `company_id` en `profiles` → RLS se aplica automáticamente
+
+### Tablas cubiertas por RLS
+
+Todas las 20 tablas del schema tienen RLS activado y políticas definidas:
+`companies`, `company_operators`, `registered_persons`, `face_embeddings`,
+`face_embedding_candidates`, `biometric_test_records`, `attendance_rules`,
+`attendances`, `access_records`, `attendance_marks`, `attendance_corrections`,
+`profiles`, `devices`, `areas`, `system_settings`, `person_schedules`,
+`person_day_conventions`, `backend_logs`, `licenses`, `app_versions`.
+
 ---
 
 ## 🗺️ Roadmap SaaS
 
 ### ✅ Implementado (versión actual)
 
-- [x] Detección facial con InsightFace
+**Core**
+- [x] Detección facial con InsightFace buffalo_s (CPU + CUDA fallback)
 - [x] Captura de 1 foto por detección perfecta
-- [x] Reconocimiento contra embeddings registrados
+- [x] Reconocimiento por similitud coseno vectorizado (numpy matrix multiply — O(1) vs O(N) loop)
 - [x] Rate limiting anti-spam (persona + tiempo)
 - [x] Registro de access_records en Supabase
 - [x] Gestión de attendances (entrada/salida)
 - [x] Subida de fotos a Supabase Storage
-- [x] API HTTP para integración con Flutter
-- [x] UI Flutter con video en vivo (headless)
+
+**Rendimiento y multi-cámara**
+- [x] Cache de embeddings en pickle (offline survival — Supabase no requerida al arrancar)
+- [x] JPEG encode una sola vez en hilo lector; `/api/snapshot` lee bytes ya codificados
+- [x] Frame skip configurable por cámara (no ejecutar InsightFace en cada frame)
+- [x] Matriz de embeddings pre-normalizada para dot product directo
+- [x] Hasta 4 cámaras simultáneas (`MultiBackendManager`) con startup en lotes paralelos
+- [x] Prioridad de cámara por zona hospitalaria (Alta/Normal/Baja — distinto FPS y calidad JPEG)
+- [x] Auto-restart con backoff exponencial (2s/4s/8s) si el backend de una cámara crashea
+- [x] Grid responsivo en UI multi-cámara: 1 col / 2 col / agrupación por zona
+- [x] Modo foco (tap para expandir una cámara individual)
+- [x] Preset hospitalario: 4 zonas preconfigadas (Urgencias, UCI, Recepción, Consultas)
+
+**Arquitectura**
+- [x] Backend dividido en módulos: `api_routes`, `attendance_service`, `enroll_service`, `remote_logger`, `startup_checks`, `device_manager`, `offline_queue`
+- [x] Flutter dividido en módulos: `BackendClient`, `BackendManager`, `MultiBackendManager`, `PythonFinder`, `SourceService`, `DeviceService`
+- [x] Inyección de dependencias via dict en `register_routes(app, deps)` — sin globals
+- [x] Credenciales en `.env` (eliminadas del código fuente); falla explícita si faltan
+- [x] `COMPANY_ID` en `.env` — preparado para multi-tenant
+
+**Seguridad**
+- [x] Token de sesión `secrets.token_hex(32)` generado en cada arranque
+- [x] Middleware `X-Backend-Token` en todos los endpoints protegidos
+- [x] Endpoints públicos explícitos: `/api/health`, `/api/snapshot`, `/api/shutdown`
+- [x] `.env` y `backend.token` en `.gitignore`
+
+**UI y cámara**
+- [x] UI Flutter con video en vivo headless (sin ventanas OpenCV)
 - [x] Selector de cámara con información descriptiva
 - [x] Soporte para cámaras virtuales (DroidCam, OBS)
-- [x] Auto-detección de Python (PATH, registro, rutas comunes)
-- [x] Cierre automático de procesos (triple kill)
-- [x] Empaquetado PyInstaller (backend.exe portátil)
-- [x] Enrollment facial interactivo
-- [x] Logs a archivo con rotación
-- [x] Liberación de puerto 5050 al iniciar
-- [x] Reconexión automática de cámara
-- [x] Fallback a siguiente cámara disponible si una falla
-- [x] Heartbeat + detección de crash del backend
-- [x] WidgetsBindingObserver para cierre por ciclo de vida
-- [x] Silenciado de logs HTTP werkzeug (stderr limpio)
-- [x] Manejo de errores de encoding en stderr de Python
-- [x] Protección anti-crash: todos los métodos de cámara con try/except
-- [x] Endpoint `/api/camera/test` para diagnóstico de cámara
 - [x] Escaneo de cámaras hasta índice 30 con CAP_ANY + DSHOW + MSMF
-- [x] Detección de cámaras "sin señal" (no_signal) en listado
+- [x] Fuentes de video unificadas: USB, DroidCam, RTSP (vía `SourceManager`)
+- [x] Endpoint `/api/camera/scan-droidcam` para descubrir DroidCam en la red
+- [x] Modo kiosko: pantalla completa, titlebar oculto, triple-tap → PIN para salir
+- [x] Indicador de conexión ON/OFF (verde/rojo) con contador de registros offline pendientes
+- [x] Menú de mantenimiento: exportar BD offline y limpiar caché
 
-### 🔄 Pendiente para MVP
+**Ciclo de vida**
+- [x] Auto-detección de Python (PATH, registro Windows, rutas comunes)
+- [x] Cierre automático triple kill (PID file + nombre proceso + puerto)
+- [x] Liberación de puerto 5050 al iniciar si está ocupado
+- [x] Reconexión automática de cámara + fallback a siguiente disponible
+- [x] Heartbeat + detección de crash del backend en Flutter
+- [x] WidgetsBindingObserver para cierre por ciclo de vida
+- [x] Limpieza periódica de caché cada 6 horas (`__pycache__`, logs rotados, .tmp)
 
-- [ ] **Reconocimiento en tiempo real sin InsightFace** — Si no hay GPU,
-      el modelo buffalo_l es lento en CPU. Evaluar ONNX Runtime optimizado
-      o usar un modelo más ligero (mobilefacenet).
-- [ ] **Múltiples cámaras simultáneas** — Para empresas con varias entradas.
-- [ ] **Cache local de embeddings** — Evitar consultar Supabase en cada
-      detección. Ya se cargan al inicio, pero falta recarga periódica.
-- [ ] **Health check automático con reconexión** — Si el backend se cae,
-      Flutter debería reintentar automáticamente.
-- [ ] **Selector de cámara con nombre real del dispositivo** — Usar
-      DirectShow Properties para obtener el nombre exacto de la cámara.
+**Enrollment**
+- [x] Enrollment facial interactivo (`enrollment.py`)
+- [x] Enrollment remoto via API HTTP (`POST /api/enroll` multipart) — desde Flutter
+- [x] `EnrollService` reutiliza modelo InsightFace ya cargado (sin doble carga)
+- [x] Refresh automático de embeddings tras enrollment exitoso
 
-### 🚀 Para SaaS completo
+**SaaS — Identidad y dispositivos**
+- [x] Login de empresa por **ID de acceso** formato `XXXX-XXXX-XXXX` (no UUID adivinable)
+- [x] `company_access_id` generado desde panel admin con botón, copiable al clipboard
+- [x] Licencias por empresa: activar/desactivar + fecha de expiración desde panel admin
+- [x] `device_uid` permanente por PC (`BF-XXXXXXXXXXXXXXXX`) generado en primer login
+- [x] Registro automático del dispositivo en Supabase (`devices`) al arrancar
+- [x] Heartbeat del dispositivo a Supabase cada 60s (`heartbeat_device` RPC)
+- [x] Eliminación de `device_uid` desde panel admin (para tests/reset)
+- [x] Roles de cámara por índice: `entrada` / `salida` / `ambas` configurables desde panel admin y dashboard
 
-- [ ] **Actualización OTA** — El backend debería poder actualizarse solo
-      sin intervención del usuario.
-- [ ] **Configuración remota** — Umbrales, cámara por defecto, etc.,
-      configurables desde el panel de administración.
-- [ ] **Modo kiosko** — La app Flutter en pantalla completa, sin bordes,
-      sin posibilidad de cerrar sin contraseña.
-- [ ] **Registro de logs en Supabase** — Para monitoreo remoto.
-- [ ] **Licenciamiento** — Validación de licencia por empresa.
-- [ ] **Instalador unificado** — .exe que instala todo (backend + Flutter)
-      con un solo click.
-- [ ] **Soporte para cámaras IP (RTSP)** — Además de USB.
+**SaaS — Sincronización offline**
+- [x] Cola offline SQLite (`backend/offline_records.db`) — registros que no pudieron subir
+- [x] Sync automático cada 10 minutos si hay internet disponible
+- [x] Sync inmediato al detectar reconexión a Supabase
+- [x] Export de la BD offline con botón en la app (descarga a `Documents/`)
+- [x] Fallback a cola offline si Supabase no responde durante detección
+
+**SaaS — Configuración remota**
+- [x] `system_settings` en Supabase: parámetros key-value por empresa
+- [x] `get_device_config` RPC: el backend descarga `system_settings` + `camera_configs` en cada heartbeat
+- [x] `mark_stale_devices_offline` RPC: marca offline dispositivos sin heartbeat en N segundos
+
+**Infraestructura SaaS**
+- [x] Logging remoto a Supabase (`SupabaseLogHandler` — queue + daemon thread, WARNING+)
+- [x] Validación de licencia al arrancar (`startup_checks.py`, fail-open)
+- [x] Check OTA con comparación semver — notifica si hay versión más nueva
+- [x] Tablas `backend_logs`, `licenses`, `app_versions` en Supabase
+- [x] Enums corregidos: `access_result` + `not_found`; `attendance_status` + `closed`
+
+**Multi-tenant y seguridad**
+- [x] Sesión persistida en SharedPreferences; logout limpia sesión y apaga backend
+- [x] `COMPANY_ID` inyectado como env var al proceso Python en cada arranque
+- [x] RLS completo en las 20 tablas — políticas por rol `root`/`admin`/`viewer`/`anon`
+- [x] Políticas de escritura para `admin` en todas las tablas de negocio
+- [x] Función `validate_company_login(access_id)` accesible por anon key (SECURITY DEFINER)
+- [x] Función `upsert_device` + `heartbeat_device` + `get_device_config` como RPCs SECURITY DEFINER
+- [x] Endpoints admin: `/api/admin/access-records`, `/api/admin/attendances`, `/api/admin/logs`
+
+**Panel admin (`panel-admin-reconocimiento-facial`)**
+- [x] Tabla de empresas con columnas: ID de acceso, Licencia, Creada, Acciones
+- [x] Botón "Generar ID" por empresa → diálogo con ID generado + copiar al clipboard
+- [x] Gestión de licencias: activar/desactivar + selector de fecha de expiración
+- [x] Dispositivos: chips de detecciones/día, versión app, UID copiable, botón reset UID
+- [x] Config de roles de cámara por dispositivo: SegmentedButton Entrada/Salida/Ambas × 4 cámaras
+
+**Dashboard (`dashboard-reconocimiento-facial`)**
+- [x] Página "Dispositivos" con tarjetas: estado online/offline, versión, detecciones, UID
+- [x] Config de roles de cámara directamente desde el dashboard del operador
+- [x] Diálogo de roles: SegmentedButton Entrada/Salida/Ambas por cámara, guarda en Supabase
+
+### 🚀 Para SaaS vendible — qué falta
+
+#### Bloqueantes críticos (sin esto no se puede vender)
+
+- [ ] **Instalador .exe unificado** — El cliente no puede instalar Python, Flutter y dependencias
+      manualmente. Necesita un setup.exe que instale todo silenciosamente.
+- [ ] **Descarga + instalación OTA automática** — La notificación ya existe (`startup_checks.py`),
+      pero falta que el backend descargue el nuevo `.exe` y lo instale sin que el cliente
+      toque nada.
+- [ ] **Onboarding de empresa en el panel admin** — Flujo para que un nuevo cliente cree su
+      empresa, reciba su ID de acceso, registre a sus empleados y llegue a la primera
+      detección exitosa. Sin este flujo guiado el producto es invendible.
+
+#### Necesario para retención y confianza
+
+- [ ] **Alertas por Supabase Realtime o email** — Notificar al administrador si el dispositivo
+      lleva más de X minutos sin detectar nadie (puede indicar que la cámara falló o que
+      el backend está caído).
+- [ ] **Nombre real de dispositivo de cámara** — Via DirectShow Properties en vez de índice
+      numérico; mejora la UX al configurar roles de cámara.
+
+#### Importante para escalar
+
+- [ ] **Soporte RTSP/cámaras IP nativas con UI** — Muchas empresas ya tienen cámaras IP
+      instaladas. La infraestructura de `SourceManager` ya lo soporta, falta UI de
+      configuración desde la app.
+- [ ] **Firma y verificación del instalador** — Para distribución segura; sin firma digital
+      Windows Defender bloquea el `.exe`.
+- [ ] **Dashboard: métricas por dispositivo** — Gráficas de detecciones por hora/día por
+      puesto (hoy el dashboard muestra asistencias globales, no por dispositivo).
 
 ---
 
